@@ -1,5 +1,6 @@
 #pragma once
 
+#include <obs-data.h>
 #include <stdint.h>
 #include <stddef.h>
 
@@ -38,4 +39,5 @@ struct credits_data {
 };
 
 struct credits_data *credits_parse_file(const char *path);
+struct credits_data *credits_build_from_settings(obs_data_t *settings);
 void credits_data_free(struct credits_data *data);

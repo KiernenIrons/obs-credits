@@ -6,6 +6,7 @@
 #include <graphics/graphics.h>
 
 #include <pthread.h>
+#include <stdio.h>
 #include <string.h>
 
 static void credits_update(void *data, obs_data_t *settings);
@@ -14,7 +15,6 @@ struct credits_source {
 	obs_source_t *self;
 
 	/* Settings */
-	char *credits_file;
 	float scroll_speed;
 	bool loop;
 	uint32_t width;
@@ -37,6 +37,118 @@ struct credits_source {
 	pthread_mutex_t mutex;
 };
 
+/* ---- Helpers to build sections array from flat settings ---- */
+
+static obs_data_array_t *
+settings_to_sections_array(obs_data_t *settings)
+{
+	int count = (int)obs_data_get_int(settings, "section_count");
+	if (count <= 0)
+		return NULL;
+
+	obs_data_array_t *arr = obs_data_array_create();
+	char key[64];
+
+	for (int i = 0; i < count; i++) {
+		obs_data_t *sec = obs_data_create();
+
+		snprintf(key, sizeof(key), "section_%d_heading", i);
+		obs_data_set_string(sec, "heading",
+				    obs_data_get_string(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_subheading", i);
+		obs_data_set_string(sec, "subheading",
+				    obs_data_get_string(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_names", i);
+		obs_data_set_string(sec, "names",
+				    obs_data_get_string(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_roles", i);
+		obs_data_set_string(sec, "roles",
+				    obs_data_get_string(settings, key));
+
+		obs_data_array_push_back(arr, sec);
+		obs_data_release(sec);
+	}
+
+	return arr;
+}
+
+/* ---- Section add/remove button callbacks ---- */
+
+static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
+			   void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(prop);
+
+	struct credits_source *ctx = data;
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
+
+	int count = (int)obs_data_get_int(settings, "section_count");
+	obs_data_set_int(settings, "section_count", count + 1);
+
+	obs_data_release(settings);
+	return true;
+}
+
+static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
+			      void *data)
+{
+	UNUSED_PARAMETER(props);
+
+	struct credits_source *ctx = data;
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
+
+	const char *name = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(name, "section_%d_remove", &idx) != 1) {
+		obs_data_release(settings);
+		return false;
+	}
+
+	int count = (int)obs_data_get_int(settings, "section_count");
+	if (idx >= count) {
+		obs_data_release(settings);
+		return false;
+	}
+
+	/* Shift sections after idx down by one */
+	char src_key[64], dst_key[64];
+	for (int i = idx; i < count - 1; i++) {
+		snprintf(src_key, sizeof(src_key), "section_%d_heading",
+			 i + 1);
+		snprintf(dst_key, sizeof(dst_key), "section_%d_heading", i);
+		obs_data_set_string(settings, dst_key,
+				    obs_data_get_string(settings, src_key));
+
+		snprintf(src_key, sizeof(src_key), "section_%d_subheading",
+			 i + 1);
+		snprintf(dst_key, sizeof(dst_key), "section_%d_subheading",
+			 i);
+		obs_data_set_string(settings, dst_key,
+				    obs_data_get_string(settings, src_key));
+
+		snprintf(src_key, sizeof(src_key), "section_%d_names", i + 1);
+		snprintf(dst_key, sizeof(dst_key), "section_%d_names", i);
+		obs_data_set_string(settings, dst_key,
+				    obs_data_get_string(settings, src_key));
+
+		snprintf(src_key, sizeof(src_key), "section_%d_roles", i + 1);
+		snprintf(dst_key, sizeof(dst_key), "section_%d_roles", i);
+		obs_data_set_string(settings, dst_key,
+				    obs_data_get_string(settings, src_key));
+	}
+
+	obs_data_set_int(settings, "section_count", count - 1);
+	obs_data_release(settings);
+
+	return true;
+}
+
+/* ---- Standard OBS source callbacks ---- */
+
 static const char *credits_get_name(void *type_data)
 {
 	UNUSED_PARAMETER(type_data);
@@ -56,7 +168,6 @@ static void credits_destroy(void *data)
 {
 	struct credits_source *ctx = data;
 
-	/* Take ownership of resources under lock */
 	pthread_mutex_lock(&ctx->mutex);
 	struct credits_layout *layout = ctx->layout;
 	struct credits_data *cdata = ctx->data;
@@ -64,7 +175,6 @@ static void credits_destroy(void *data)
 	ctx->data = NULL;
 	pthread_mutex_unlock(&ctx->mutex);
 
-	/* Free outside mutex (renderer calls obs_enter_graphics) */
 	credits_renderer_free(layout);
 	credits_data_free(cdata);
 
@@ -73,7 +183,6 @@ static void credits_destroy(void *data)
 	obs_leave_graphics();
 
 	pthread_mutex_destroy(&ctx->mutex);
-	bfree(ctx->credits_file);
 	bfree(ctx->default_font_face);
 	bfree(ctx);
 }
@@ -82,7 +191,6 @@ static void credits_update(void *data, obs_data_t *settings)
 {
 	struct credits_source *ctx = data;
 
-	const char *file = obs_data_get_string(settings, "credits_file");
 	double speed = obs_data_get_double(settings, "scroll_speed");
 	bool loop_val = obs_data_get_bool(settings, "loop");
 	int w = (int)obs_data_get_int(settings, "width");
@@ -105,17 +213,22 @@ static void credits_update(void *data, obs_data_t *settings)
 	uint32_t tcolor =
 		(uint32_t)obs_data_get_int(settings, "text_color");
 
-	/* Swap out old layout/data under lock, free outside lock to
-	 * avoid holding mutex while obs_enter_graphics runs (deadlock) */
+	/* Build sections array from flat settings keys */
+	obs_data_array_t *arr = settings_to_sections_array(settings);
+
+	/* Temporarily inject the array so the parser can read it */
+	obs_data_t *tmp = obs_data_create();
+	if (arr) {
+		obs_data_set_array(tmp, "sections", arr);
+		obs_data_array_release(arr);
+	}
+
 	pthread_mutex_lock(&ctx->mutex);
 
 	struct credits_layout *old_layout = ctx->layout;
 	struct credits_data *old_data = ctx->data;
 	ctx->layout = NULL;
 	ctx->data = NULL;
-
-	bfree(ctx->credits_file);
-	ctx->credits_file = (file && file[0] != '\0') ? bstrdup(file) : NULL;
 
 	ctx->scroll_speed = speed > 0.0 ? (float)speed : 60.0f;
 	ctx->loop = loop_val;
@@ -129,11 +242,8 @@ static void credits_update(void *data, obs_data_t *settings)
 	ctx->heading_color = hcolor != 0 ? hcolor : 0xFFFFD700;
 	ctx->text_color = tcolor != 0 ? tcolor : 0xFFFFFFFF;
 
-	/* Parse new credits file */
-	if (ctx->credits_file)
-		ctx->data = credits_parse_file(ctx->credits_file);
+	ctx->data = credits_build_from_settings(tmp);
 
-	/* Reset scroll state - layout rebuilt on next video_tick */
 	ctx->scroll_offset = 0.0f;
 	ctx->current_speed = 0.0f;
 	ctx->scrolling = true;
@@ -141,7 +251,8 @@ static void credits_update(void *data, obs_data_t *settings)
 
 	pthread_mutex_unlock(&ctx->mutex);
 
-	/* Free old resources outside mutex (renderer calls obs_enter_graphics) */
+	obs_data_release(tmp);
+
 	credits_renderer_free(old_layout);
 	credits_data_free(old_data);
 }
@@ -154,6 +265,7 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "height", 1080);
 	obs_data_set_default_int(settings, "heading_color", 0xFFFFD700);
 	obs_data_set_default_int(settings, "text_color", 0xFFFFFFFF);
+	obs_data_set_default_int(settings, "section_count", 1);
 }
 
 static void credits_video_tick(void *data, float seconds)
@@ -165,7 +277,6 @@ static void credits_video_tick(void *data, float seconds)
 
 	pthread_mutex_lock(&ctx->mutex);
 
-	/* Build layout on graphics thread if we have data but no layout */
 	if (ctx->data && !ctx->layout) {
 		ctx->layout = credits_renderer_build(
 			ctx->data, ctx->width, ctx->default_font_face,
@@ -176,20 +287,17 @@ static void credits_video_tick(void *data, float seconds)
 				credits_renderer_total_height(ctx->layout);
 	}
 
-	/* Advance scroll */
 	if (ctx->scrolling && ctx->layout) {
 		if (!ctx->started) {
 			ctx->scroll_offset = -(float)ctx->height;
 			ctx->started = true;
 		}
 
-		/* Smooth acceleration */
 		ctx->current_speed +=
 			(ctx->scroll_speed - ctx->current_speed) * 5.0f *
 			seconds;
 		ctx->scroll_offset += ctx->current_speed * seconds;
 
-		/* End / loop check */
 		if (ctx->scroll_offset > ctx->total_height) {
 			if (ctx->loop) {
 				ctx->scroll_offset = -(float)ctx->height;
@@ -215,7 +323,6 @@ static void credits_video_render(void *data, gs_effect_t *effect)
 		return;
 	}
 
-	/* Create texrender on first call (must be on graphics thread) */
 	if (!ctx->texrender)
 		ctx->texrender =
 			gs_texrender_create(GS_RGBA, GS_ZS_NONE);
@@ -268,14 +375,70 @@ static uint32_t credits_get_height(void *data)
 
 static obs_properties_t *credits_get_properties(void *data)
 {
-	UNUSED_PARAMETER(data);
+	struct credits_source *ctx = data;
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
 
 	obs_properties_t *props = obs_properties_create();
 
-	obs_properties_add_path(props, "credits_file",
-				obs_module_text("CreditsFile"), OBS_PATH_FILE,
-				"JSON files (*.json)", NULL);
+	int count = (int)obs_data_get_int(settings, "section_count");
+	if (count < 0)
+		count = 0;
 
+	for (int i = 0; i < count; i++) {
+		char group_name[64];
+		char heading_name[64];
+		char sub_name[64];
+		char names_name[64];
+		char roles_name[64];
+		char remove_name[64];
+		char label[64];
+
+		snprintf(group_name, sizeof(group_name), "section_%d_group",
+			 i);
+		snprintf(heading_name, sizeof(heading_name),
+			 "section_%d_heading", i);
+		snprintf(sub_name, sizeof(sub_name), "section_%d_subheading",
+			 i);
+		snprintf(names_name, sizeof(names_name), "section_%d_names",
+			 i);
+		snprintf(roles_name, sizeof(roles_name), "section_%d_roles",
+			 i);
+		snprintf(remove_name, sizeof(remove_name),
+			 "section_%d_remove", i);
+		snprintf(label, sizeof(label), "%s %d",
+			 obs_module_text("Section"), i + 1);
+
+		obs_properties_t *group = obs_properties_create();
+
+		obs_properties_add_text(group, heading_name,
+					obs_module_text("Heading"),
+					OBS_TEXT_DEFAULT);
+
+		obs_properties_add_text(group, sub_name,
+					obs_module_text("Subheading"),
+					OBS_TEXT_DEFAULT);
+
+		obs_properties_add_text(group, names_name,
+					obs_module_text("Names"),
+					OBS_TEXT_MULTILINE);
+
+		obs_properties_add_text(group, roles_name,
+					obs_module_text("Roles"),
+					OBS_TEXT_MULTILINE);
+
+		obs_properties_add_button2(group, remove_name,
+					   obs_module_text("RemoveSection"),
+					   on_remove_section, ctx);
+
+		obs_properties_add_group(props, group_name, label,
+					 OBS_GROUP_NORMAL, group);
+	}
+
+	obs_properties_add_button2(props, "add_section",
+				   obs_module_text("AddSection"),
+				   on_add_section, ctx);
+
+	/* General settings */
 	obs_properties_add_float(props, "scroll_speed",
 				 obs_module_text("ScrollSpeed"), 10.0, 500.0,
 				 5.0);
@@ -296,6 +459,8 @@ static obs_properties_t *credits_get_properties(void *data)
 
 	obs_properties_add_color(props, "text_color",
 				 obs_module_text("TextColor"));
+
+	obs_data_release(settings);
 
 	return props;
 }

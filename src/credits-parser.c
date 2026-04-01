@@ -193,6 +193,143 @@ struct credits_data *credits_parse_file(const char *path)
 	return data;
 }
 
+static size_t count_lines(const char *text)
+{
+	if (!text || text[0] == '\0')
+		return 0;
+	size_t count = 1;
+	for (const char *p = text; *p; p++) {
+		if (*p == '\n')
+			count++;
+	}
+	return count;
+}
+
+static char *get_line(const char *text, size_t line_idx)
+{
+	if (!text)
+		return NULL;
+
+	const char *start = text;
+	for (size_t i = 0; i < line_idx && *start; i++) {
+		while (*start && *start != '\n')
+			start++;
+		if (*start == '\n')
+			start++;
+	}
+
+	if (*start == '\0')
+		return NULL;
+
+	const char *end = start;
+	while (*end && *end != '\n')
+		end++;
+
+	/* Trim trailing whitespace */
+	while (end > start && (*(end - 1) == ' ' || *(end - 1) == '\r'))
+		end--;
+
+	if (end == start)
+		return NULL;
+
+	size_t len = (size_t)(end - start);
+	char *line = bmalloc(len + 1);
+	memcpy(line, start, len);
+	line[len] = '\0';
+	return line;
+}
+
+struct credits_data *credits_build_from_settings(obs_data_t *settings)
+{
+	if (!settings)
+		return NULL;
+
+	obs_data_array_t *arr = obs_data_get_array(settings, "sections");
+	if (!arr)
+		return NULL;
+
+	size_t num_sections = obs_data_array_count(arr);
+	if (num_sections == 0) {
+		obs_data_array_release(arr);
+		return NULL;
+	}
+
+	struct credits_data *data = bzalloc(sizeof(struct credits_data));
+	data->num_sections = num_sections;
+	data->sections =
+		bzalloc(sizeof(struct credits_section) * num_sections);
+
+	for (size_t i = 0; i < num_sections; i++) {
+		obs_data_t *sec = obs_data_array_item(arr, i);
+		struct credits_section *section = &data->sections[i];
+
+		const char *heading = obs_data_get_string(sec, "heading");
+		const char *subheading =
+			obs_data_get_string(sec, "subheading");
+		const char *names = obs_data_get_string(sec, "names");
+		const char *roles = obs_data_get_string(sec, "roles");
+
+		if (heading && heading[0] != '\0')
+			section->heading = bstrdup(heading);
+
+		/* Count entries: subheading (if present) + name/role lines */
+		size_t name_lines = count_lines(names);
+		size_t role_lines = count_lines(roles);
+		size_t max_lines =
+			name_lines > role_lines ? name_lines : role_lines;
+		bool has_sub = subheading && subheading[0] != '\0';
+
+		size_t num_entries = max_lines + (has_sub ? 1 : 0);
+		if (num_entries > 0) {
+			section->num_entries = num_entries;
+			section->entries = bzalloc(
+				sizeof(struct credits_entry) * num_entries);
+
+			size_t idx = 0;
+
+			if (has_sub) {
+				section->entries[idx].type =
+					CREDITS_ENTRY_TEXT;
+				section->entries[idx].text =
+					bstrdup(subheading);
+				idx++;
+			}
+
+			for (size_t j = 0; j < max_lines; j++) {
+				char *name = get_line(names, j);
+				char *role = get_line(roles, j);
+
+				if (name && role) {
+					section->entries[idx].type =
+						CREDITS_ENTRY_NAME_ROLE;
+					section->entries[idx].name = name;
+					section->entries[idx].role = role;
+				} else if (name) {
+					section->entries[idx].type =
+						CREDITS_ENTRY_NAME_ONLY;
+					section->entries[idx].name = name;
+					bfree(role);
+				} else {
+					section->entries[idx].type =
+						CREDITS_ENTRY_NAME_ONLY;
+					section->entries[idx].name =
+						role ? role : bstrdup("");
+				}
+				idx++;
+			}
+		}
+
+		obs_data_release(sec);
+	}
+
+	obs_data_array_release(arr);
+
+	blog(LOG_INFO, "[obs-credits] Built %zu section(s) from settings",
+	     data->num_sections);
+
+	return data;
+}
+
 void credits_data_free(struct credits_data *data)
 {
 	if (!data)
