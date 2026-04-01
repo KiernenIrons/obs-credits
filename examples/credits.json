@@ -1,0 +1,29 @@
+{
+  "sections": [
+    {
+      "heading": "Directed By",
+      "heading_style": { "font": "Georgia", "size": 56, "color": "#FFD700" },
+      "entries": [
+        { "type": "name_role", "name": "Kiernen Irons", "role": "Director & Developer" }
+      ]
+    },
+    {
+      "heading": "Cast",
+      "entries": [
+        { "type": "name_role", "name": "Alice", "role": "Lead" },
+        { "type": "name_role", "name": "Bob", "role": "Supporting" },
+        { "type": "name_role", "name": "Charlie", "role": "Extra" }
+      ]
+    },
+    {
+      "heading": "Special Thanks",
+      "heading_style": { "size": 48, "color": "#FF6B6B" },
+      "entries": [
+        { "type": "name_only", "name": "The Community" },
+        { "type": "name_only", "name": "All the Viewers" },
+        { "type": "spacer", "height": 30 },
+        { "type": "text", "text": "Thank you for watching!" }
+      ]
+    }
+  ]
+}
