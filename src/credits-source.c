@@ -133,7 +133,7 @@ static void credits_update(void *data, obs_data_t *settings)
 	if (ctx->credits_file)
 		ctx->data = credits_parse_file(ctx->credits_file);
 
-	/* Reset scroll state — layout rebuilt on next video_tick */
+	/* Reset scroll state - layout rebuilt on next video_tick */
 	ctx->scroll_offset = 0.0f;
 	ctx->current_speed = 0.0f;
 	ctx->scrolling = true;

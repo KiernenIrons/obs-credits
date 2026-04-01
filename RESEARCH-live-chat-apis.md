@@ -1,6 +1,6 @@
 # Live Stream Chat API Research
 
-Research for the OBS Credits Plugin — tracking viewers, chatters, and donors across streaming platforms.
+Research for the OBS Credits Plugin - tracking viewers, chatters, and donors across streaming platforms.
 
 > **Note**: This research is based on API documentation as of early-to-mid 2025. Verify current endpoints and quota details against official docs before implementation, as platforms update frequently.
 >
@@ -17,7 +17,7 @@ Research for the OBS Credits Plugin — tracking viewers, chatters, and donors a
 
 ### Overview
 
-YouTube provides live chat access through the **YouTube Data API v3**. There is no WebSocket/PubSub push mechanism for live chat — it is **polling-based only**.
+YouTube provides live chat access through the **YouTube Data API v3**. There is no WebSocket/PubSub push mechanism for live chat - it is **polling-based only**.
 
 ### Endpoint: `liveChatMessages.list`
 
@@ -26,14 +26,14 @@ GET https://www.googleapis.com/youtube/v3/liveChat/messages
 ```
 
 **Required parameters:**
-- `liveChatId` — The ID of the live chat (obtained from `liveBroadcasts.list` or `videos.list` with `liveStreamingDetails` part)
-- `part` — Comma-separated list: `snippet`, `authorDetails`, `id`
+- `liveChatId` - The ID of the live chat (obtained from `liveBroadcasts.list` or `videos.list` with `liveStreamingDetails` part)
+- `part` - Comma-separated list: `snippet`, `authorDetails`, `id`
 
 **Optional parameters:**
-- `pageToken` — For pagination (returned in previous response as `nextPageToken`)
-- `maxResults` — 200 to 2000 (default 500)
-- `hl` — Language hint
-- `profileImageSize` — Size of profile images returned
+- `pageToken` - For pagination (returned in previous response as `nextPageToken`)
+- `maxResults` - 200 to 2000 (default 500)
+- `hl` - Language hint
+- `profileImageSize` - Size of profile images returned
 
 **Response structure (key fields):**
 ```json
@@ -96,21 +96,21 @@ GET https://www.googleapis.com/youtube/v3/liveChat/messages
 ### Detecting Super Chats / Super Stickers
 
 The `snippet.type` field indicates message type:
-- `"textMessageEvent"` — Normal chat message
-- `"superChatEvent"` — Super Chat (paid message)
-- `"superStickerEvent"` — Super Sticker
-- `"memberMilestoneChatEvent"` — Membership milestone
-- `"newSponsorEvent"` — New channel member
-- `"membershipGiftingEvent"` — Gift membership
-- `"giftMembershipReceivedEvent"` — Received gift membership
-- `"messageDeletedEvent"` — Deleted message
-- `"userBannedEvent"` — Banned user
+- `"textMessageEvent"` - Normal chat message
+- `"superChatEvent"` - Super Chat (paid message)
+- `"superStickerEvent"` - Super Sticker
+- `"memberMilestoneChatEvent"` - Membership milestone
+- `"newSponsorEvent"` - New channel member
+- `"membershipGiftingEvent"` - Gift membership
+- `"giftMembershipReceivedEvent"` - Received gift membership
+- `"messageDeletedEvent"` - Deleted message
+- `"userBannedEvent"` - Banned user
 
 For Super Chats, extract donation info from `snippet.superChatDetails`:
-- `amountMicros` — Amount in micros (divide by 1,000,000 for actual amount)
-- `currency` — ISO 4217 currency code
-- `amountDisplayString` — Formatted string like "$5.00"
-- `tier` — 1-7, corresponds to color tier
+- `amountMicros` - Amount in micros (divide by 1,000,000 for actual amount)
+- `currency` - ISO 4217 currency code
+- `amountDisplayString` - Formatted string like "$5.00"
+- `tier` - 1-7, corresponds to color tier
 
 ### Getting unique chatters
 
@@ -136,8 +136,8 @@ The `liveChatMessages.list` endpoint requires an authenticated user. An API key 
 7. Refresh with `refresh_token` when access token expires (1 hour)
 
 **Required scopes:**
-- `https://www.googleapis.com/auth/youtube.readonly` — Read live chat
-- `https://www.googleapis.com/auth/youtube` — Full access (needed if also sending messages)
+- `https://www.googleapis.com/auth/youtube.readonly` - Read live chat
+- `https://www.googleapis.com/auth/youtube` - Full access (needed if also sending messages)
 
 ### Quota costs and rate limits
 
@@ -158,14 +158,14 @@ YouTube Data API v3 has a **quota system** (not simple rate limits):
 
 ### Getting the `liveChatId`
 
-**Option A** — From `liveBroadcasts.list` (100 quota units):
+**Option A** - From `liveBroadcasts.list` (100 quota units):
 ```
 GET https://www.googleapis.com/youtube/v3/liveBroadcasts
   ?part=snippet&broadcastStatus=active&mine=true
 ```
 Returns `snippet.liveChatId`.
 
-**Option B** — From `videos.list` (1 quota unit, much cheaper):
+**Option B** - From `videos.list` (1 quota unit, much cheaper):
 ```
 GET https://www.googleapis.com/youtube/v3/videos
   ?part=liveStreamingDetails&id=VIDEO_ID
@@ -182,7 +182,7 @@ Twitch chat is built on IRC. You can connect using any IRC client.
 
 **Connection details:**
 - Server: `irc.chat.twitch.tv`
-- Port: `6667` (plaintext) or `6697` (TLS — recommended)
+- Port: `6667` (plaintext) or `6697` (TLS - recommended)
 - WebSocket: `wss://irc-ws.chat.twitch.tv:443`
 
 **Authentication:**
@@ -230,12 +230,12 @@ With `twitch.tv/commands` capability, you receive USERNOTICE messages:
 ```
 
 Key `msg-id` values:
-- `sub` — New subscription
-- `resub` — Resubscription
-- `subgift` — Gift sub to specific user
-- `submysterygift` — Anonymous mass gift subs
-- `raid` — Incoming raid
-- `ritual` — New viewer ritual
+- `sub` - New subscription
+- `resub` - Resubscription
+- `subgift` - Gift sub to specific user
+- `submysterygift` - Anonymous mass gift subs
+- `raid` - Incoming raid
+- `ritual` - New viewer ritual
 
 **IRC rate limits:**
 - Regular users: 20 messages per 30 seconds
@@ -334,11 +334,11 @@ Content-Type: application/json
    - Good UX for desktop plugin: show user a code, they authorize in browser
 
 **Required scopes for credits plugin:**
-- `user:read:chat` — Read chat messages (EventSub)
-- `chat:read` — Read chat via IRC
-- `bits:read` — Read bits/cheers
-- `channel:read:subscriptions` — Read sub events
-- `moderator:read:followers` — Read follow events
+- `user:read:chat` - Read chat messages (EventSub)
+- `chat:read` - Read chat via IRC
+- `bits:read` - Read bits/cheers
+- `channel:read:subscriptions` - Read sub events
+- `moderator:read:followers` - Read follow events
 
 **Token validation:**
 - Validate tokens periodically: `GET https://id.twitch.tv/oauth2/validate`
@@ -409,7 +409,7 @@ The plugin itself makes HTTP/WebSocket connections to each platform.
 **Cons:**
 - Complex C/C++ HTTP/WebSocket code
 - OAuth flows awkward from a native plugin (need to open browser, handle redirects)
-- Hard to maintain — API changes require plugin rebuilds
+- Hard to maintain - API changes require plugin rebuilds
 - C/C++ JSON parsing is verbose
 - Concurrent connections to multiple platforms complicate threading
 
@@ -572,9 +572,9 @@ Bits to USD conversion: 100 bits = ~$1.40 USD (viewer cost), but the streamer re
 ### Twitch Subscriptions
 
 **Via EventSub:**
-- `channel.subscribe` — New sub (tier 1/2/3)
-- `channel.subscription.gift` — Gift sub
-- `channel.subscription.message` — Resub with message
+- `channel.subscribe` - New sub (tier 1/2/3)
+- `channel.subscription.gift` - Gift sub
+- `channel.subscription.message` - Resub with message
 
 Subscription tiers and approximate values:
 - Tier 1: $4.99/month
@@ -605,7 +605,7 @@ https://sockets.streamlabs.com?token=<socket_token>
 ```
 - Connect via Socket.IO
 - Listen for event type `"event"` with `type: "donation"`
-- Also receives follows, subs, bits, raids — already aggregated across platforms
+- Also receives follows, subs, bits, raids - already aggregated across platforms
 
 **Streamlabs is particularly useful** because it aggregates donations from multiple sources (PayPal, credit card tips, etc.) that are NOT captured by platform-native APIs.
 
@@ -782,11 +782,11 @@ typedef struct credits_data {
 ### Sorting for credits display
 
 The plugin should support multiple sort orders for the credits roll:
-1. **By donation amount** (descending) — Top donors first
-2. **By message count** (descending) — Most active chatters first
-3. **By first appearance** (ascending) — Order they arrived
-4. **Alphabetical** — By display name
-5. **By role** — Moderators, then subscribers, then regular chatters
+1. **By donation amount** (descending) - Top donors first
+2. **By message count** (descending) - Most active chatters first
+3. **By first appearance** (ascending) - Order they arrived
+4. **Alphabetical** - By display name
+5. **By role** - Moderators, then subscribers, then regular chatters
 
 ### Credits roll sections (suggested)
 

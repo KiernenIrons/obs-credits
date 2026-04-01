@@ -1,0 +1,23 @@
+{
+  "attribution": {
+    "commit": "Author: Kiernen Irons",
+    "pr": "Author: Kiernen Irons"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "if": "Bash(git commit:*)",
+        "hooks": [
+          {
+            "type": "agent",
+            "prompt": "IMPORTANT: You are a pre-commit code review agent for an OBS Studio plugin project. A git commit is about to happen. You MUST review all staged changes for critical issues before allowing it.\n\n1. Run `git diff --cached` to see staged changes and `git diff --cached --name-only` to list files.\n2. Read each changed file fully.\n3. Check for these CRITICAL issues that MUST block the commit:\n   - Graphics thread violations (gs_* calls outside video_render or obs_enter/leave_graphics)\n   - Use-after-free on ref-counted OBS objects (obs_data_t, obs_source_t)\n   - Double free / releasing unowned objects\n   - Missing OBS_DECLARE_MODULE() in plugin entry\n   - Missing null checks on obs_data_get_*/obs_source_get_* return values\n   - Memory leaks (bmalloc/obs_data_create without matching free/release)\n   - Thread safety violations (shared state in update callback without mutex)\n   - Syntax errors or undeclared identifiers\n4. Also note WARNINGS (malloc instead of bmalloc, printf instead of blog, missing localization, missing symbol prefix, platform code without #ifdef).\n5. If ANY critical issue is found, you MUST output JSON: {\"decision\": \"block\", \"reason\": \"CRITICAL: <description of issues found>\"}\n6. If no critical issues, output: {\"decision\": \"allow\", \"reason\": \"Code check passed. <N> warnings found.\"}",
+            "model": "claude-sonnet-4-6",
+            "timeout": 120,
+            "statusMessage": "Running OBS plugin code review..."
+          }
+        ]
+      }
+    ]
+  }
+}

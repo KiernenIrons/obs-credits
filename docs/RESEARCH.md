@@ -1,4 +1,4 @@
-# OBS Credits Plugin — Technical Research
+# OBS Credits Plugin - Technical Research
 
 **Author:** Kiernen Irons
 **Date:** 2026-04-01
@@ -17,9 +17,9 @@
 7. [Data Model & Serialization](#7-data-model--serialization)
 8. [Properties UI](#8-properties-ui)
 9. [Discord Bot Integration](#9-discord-bot-integration)
-10. [Live Chat — YouTube](#10-live-chat--youtube)
-11. [Live Chat — Twitch](#11-live-chat--twitch)
-12. [Live Chat — Kick & Others](#12-live-chat--kick--others)
+10. [Live Chat - YouTube](#10-live-chat--youtube)
+11. [Live Chat - Twitch](#11-live-chat--twitch)
+12. [Live Chat - Kick & Others](#12-live-chat--kick--others)
 13. [Donation Tracking](#13-donation-tracking)
 14. [Architecture & Integration Strategy](#14-architecture--integration-strategy)
 15. [Unified Data Structures](#15-unified-data-structures)
@@ -31,16 +31,16 @@
 
 ## 1. Plugin Vision
 
-A cinematic, scrolling credits source for OBS Studio — like the end credits of a movie — that supports:
+A cinematic, scrolling credits source for OBS Studio - like the end credits of a movie - that supports:
 
-- **Headings** — section titles (e.g., "Director", "Special Thanks", "Moderators")
-- **Names & Roles** — paired text entries (name on left, role on right or vice versa)
-- **Images** — logos, avatars, emojis inline or alongside names
-- **Video Clips** — small clips that scroll with the credits on the side
-- **Live Discord data** — server boosters, moderators, honourable mentions pulled from a Discord bot
-- **Live chat participants** — auto-populated from YouTube, Twitch, and other platforms
-- **Donation roll** — people who donated during the stream, with amounts
-- **Multi-platform** — works on Windows, macOS, Linux
+- **Headings** - section titles (e.g., "Director", "Special Thanks", "Moderators")
+- **Names & Roles** - paired text entries (name on left, role on right or vice versa)
+- **Images** - logos, avatars, emojis inline or alongside names
+- **Video Clips** - small clips that scroll with the credits on the side
+- **Live Discord data** - server boosters, moderators, honourable mentions pulled from a Discord bot
+- **Live chat participants** - auto-populated from YouTube, Twitch, and other platforms
+- **Donation roll** - people who donated during the stream, with amounts
+- **Multi-platform** - works on Windows, macOS, Linux
 
 ---
 
@@ -74,7 +74,7 @@ struct obs_source_info credits_source_info = {
 |---|---|---|
 | `create` | UI thread | Allocate state, parse initial settings |
 | `destroy` | UI thread | Free all resources |
-| `update` | Any thread | Settings changed — reload config (mutex-protect shared state) |
+| `update` | Any thread | Settings changed - reload config (mutex-protect shared state) |
 | `video_tick(data, seconds)` | Graphics thread | Advance animation, `seconds` = delta time (~0.016 at 60fps) |
 | `video_render(data, effect)` | Graphics thread | All GPU draw calls happen here |
 | `get_properties` | UI thread | Build the settings UI |
@@ -167,7 +167,7 @@ gs_matrix_pop();
 - Supports all system fonts
 - OBS handles the heavy lifting
 
-**Alternative — "text_gdiplus" on Windows:** Higher quality on Windows but not cross-platform. Can detect platform at runtime and choose.
+**Alternative - "text_gdiplus" on Windows:** Higher quality on Windows but not cross-platform. Can detect platform at runtime and choose.
 
 ### Text Types Needed
 
@@ -210,9 +210,9 @@ Same API, but call `gs_image_file3_update_texture(&image)` in `video_tick` to ad
 
 Two approaches:
 
-**Option A — Font-based emoji:** If the system font supports emoji (e.g., Segoe UI Emoji on Windows, Apple Color Emoji on macOS), the `text_ft2_source` child will render them natively. This is the simplest path.
+**Option A - Font-based emoji:** If the system font supports emoji (e.g., Segoe UI Emoji on Windows, Apple Color Emoji on macOS), the `text_ft2_source` child will render them natively. This is the simplest path.
 
-**Option B — Image-based emoji:** For consistent cross-platform emoji, ship a sprite sheet (e.g., Twemoji/Noto Emoji) and render emoji as inline images. Parse text for emoji codepoints, replace with image draws.
+**Option B - Image-based emoji:** For consistent cross-platform emoji, ship a sprite sheet (e.g., Twemoji/Noto Emoji) and render emoji as inline images. Parse text for emoji codepoints, replace with image draws.
 
 **Recommendation:** Start with Option A (font-native emoji). Fall back to Option B only if cross-platform consistency is critical.
 
@@ -520,7 +520,7 @@ The plugin fetches live data from a Discord server to populate credits sections 
 ### Required Bot Setup
 
 1. Create a bot at https://discord.com/developers/applications
-2. Enable **Server Members Intent** (privileged — required to list members)
+2. Enable **Server Members Intent** (privileged - required to list members)
 3. Invite with scope `bot` and permission `1024` (View Channels):
    ```
    https://discord.com/oauth2/authorize?client_id=APP_ID&scope=bot&permissions=1024
@@ -537,7 +537,7 @@ The plugin fetches live data from a Discord server to populate credits sections 
 
 ### Authentication
 
-Simple static token — no OAuth flow needed at runtime:
+Simple static token - no OAuth flow needed at runtime:
 
 ```
 Authorization: Bot <token>
@@ -574,9 +574,9 @@ for (int r = 0; r < num_roles; r++) {
 ### Honourable Mentions
 
 No built-in Discord concept. Options:
-1. **Bot-managed database** — Slash commands like `/honour add @user reason` stored in SQLite/JSON
-2. **Dedicated channel** — Bot reads messages from a specific channel via `GET /channels/{id}/messages`
-3. **Local config file** — Maintained manually, plugin reads it directly
+1. **Bot-managed database** - Slash commands like `/honour add @user reason` stored in SQLite/JSON
+2. **Dedicated channel** - Bot reads messages from a specific channel via `GET /channels/{id}/messages`
+3. **Local config file** - Maintained manually, plugin reads it directly
 
 ### Avatar URLs
 
@@ -612,15 +612,15 @@ GET("https://discord.com/api/v10/guilds/{id}/members?limit=1000");
 curl_easy_cleanup(curl);
 ```
 
-**Must run on a background thread** — never block the OBS graphics/UI thread with HTTP calls.
+**Must run on a background thread** - never block the OBS graphics/UI thread with HTTP calls.
 
 ---
 
-## 10. Live Chat — YouTube
+## 10. Live Chat - YouTube
 
 ### YouTube Live Chat API
 
-**Polling-based** — no WebSocket. Use `liveChatMessages.list`:
+**Polling-based** - no WebSocket. Use `liveChatMessages.list`:
 
 ```
 GET https://www.googleapis.com/youtube/v3/liveChat/messages
@@ -638,9 +638,9 @@ GET https://www.googleapis.com/youtube/v3/liveChat/messages
 ### Detecting Super Chats (Donations)
 
 In the response, `snippet.type` indicates message type:
-- `textMessageEvent` — regular chat
-- `superChatEvent` — Super Chat (donation)
-- `superStickerEvent` — Super Sticker
+- `textMessageEvent` - regular chat
+- `superChatEvent` - Super Chat (donation)
+- `superStickerEvent` - Super Sticker
 
 Super Chat details:
 ```json
@@ -676,7 +676,7 @@ No "list all chatters" endpoint. Must track unique `authorDetails.channelId` val
 
 ---
 
-## 11. Live Chat — Twitch
+## 11. Live Chat - Twitch
 
 ### Two Approaches
 
@@ -699,7 +699,7 @@ Connect to wss://eventsub.wss.twitch.tv/ws
 Subscribe to events via REST after connection
 ```
 
-Covers: chat messages, bits, subs, gift subs, follows, raids — all structured JSON.
+Covers: chat messages, bits, subs, gift subs, follows, raids - all structured JSON.
 
 ### Authentication
 
@@ -720,14 +720,14 @@ Listen for `PRIVMSG` (IRC) or `channel.chat.message` (EventSub) events. Track un
 
 ---
 
-## 12. Live Chat — Kick & Others
+## 12. Live Chat - Kick & Others
 
 ### Kick
 
 - **No official public API** as of early 2025
 - Community reverse-engineering uses Pusher WebSocket channels
-- Unstable — endpoints and message formats can change without notice
-- **Treat as experimental** — implement last, behind a feature flag
+- Unstable - endpoints and message formats can change without notice
+- **Treat as experimental** - implement last, behind a feature flag
 
 ### Other Platforms
 
@@ -831,13 +831,13 @@ The live data features (chat, donations, Discord) are best handled by a **compan
 
 ### Phased Approach
 
-**Phase 1 (MVP) — File-based:**
+**Phase 1 (MVP) - File-based:**
 - Companion writes `participants.json` to a known path
 - Plugin reads the file on a timer (every 5-10 seconds) or on button press
 - Zero networking code in the C plugin
 - Simple and debuggable
 
-**Phase 2 — WebSocket:**
+**Phase 2 - WebSocket:**
 - Replace file polling with `ws://localhost:9876`
 - Real-time updates as chatters/donations arrive
 - Plugin uses a background thread for WebSocket client
@@ -954,7 +954,7 @@ struct credits_live_data {
 
 ## 16. Implementation Roadmap
 
-### Phase 1 — Core Credits Roll (MVP)
+### Phase 1 - Core Credits Roll (MVP)
 
 - [ ] Plugin skeleton: module load/unload, source registration
 - [ ] Static credits rendering: headings, names, roles from JSON config
@@ -964,15 +964,15 @@ struct credits_live_data {
 - [ ] Properties UI for basic configuration
 - [ ] One-shot and loop scroll modes
 
-### Phase 2 — Rich Media
+### Phase 2 - Rich Media
 
 - [ ] Video clip playback alongside credits
 - [ ] Emoji support (font-native first)
-- [ ] Discord integration (direct libcurl — boosters, mods, VIPs)
+- [ ] Discord integration (direct libcurl - boosters, mods, VIPs)
 - [ ] Avatar image caching and rendering
 - [ ] "Fetch Discord Data" button in properties
 
-### Phase 3 — Live Data
+### Phase 3 - Live Data
 
 - [ ] Companion service scaffold (Node.js recommended)
 - [ ] YouTube Live Chat adapter (OAuth + polling)
@@ -981,7 +981,7 @@ struct credits_live_data {
 - [ ] Auto-populated "Stream Chat" credits section
 - [ ] Donation tracking (Super Chat, Bits)
 
-### Phase 4 — Polish & Extras
+### Phase 4 - Polish & Extras
 
 - [ ] Streamlabs / StreamElements integration
 - [ ] WebSocket communication (replace file polling)
@@ -1032,12 +1032,12 @@ struct credits_live_data {
 
 ### Open Questions
 
-1. **Individual boost count** — Discord API does not expose per-user boost count. Can we get this from the bot via a workaround, or only show "Booster since [date]"?
-2. **YouTube quota** — 10,000 units/day is tight for long streams. Should we apply for increased quota immediately, or offer a "lite mode" that polls less frequently?
-3. **Companion service packaging** — How do we distribute the companion? Standalone executable (pkg/nexe)? Require Node.js? Docker?
-4. **Credits editor** — Is the OBS properties UI sufficient, or do we need a full custom Qt editor from day one?
-5. **Font-native emoji** — How well does `text_ft2_source` handle emoji across platforms? Need to test Windows/macOS/Linux.
-6. **Clip sync** — Should video clips loop for the duration they're visible, or play once? What if the clip is longer than its scroll visibility window?
+1. **Individual boost count** - Discord API does not expose per-user boost count. Can we get this from the bot via a workaround, or only show "Booster since [date]"?
+2. **YouTube quota** - 10,000 units/day is tight for long streams. Should we apply for increased quota immediately, or offer a "lite mode" that polls less frequently?
+3. **Companion service packaging** - How do we distribute the companion? Standalone executable (pkg/nexe)? Require Node.js? Docker?
+4. **Credits editor** - Is the OBS properties UI sufficient, or do we need a full custom Qt editor from day one?
+5. **Font-native emoji** - How well does `text_ft2_source` handle emoji across platforms? Need to test Windows/macOS/Linux.
+6. **Clip sync** - Should video clips loop for the duration they're visible, or play once? What if the clip is longer than its scroll visibility window?
 
 ### Risks
 

@@ -1,4 +1,4 @@
-# OBS Credits Plugin — Development Guide
+# OBS Credits Plugin - Development Guide
 
 ## Author
 
@@ -6,19 +6,19 @@
 
 ## Documentation
 
-- `docs/RESEARCH.md` — Full technical research covering OBS API, Discord integration, YouTube/Twitch chat, donations, architecture decisions, data structures, and implementation roadmap.
-- `docs/MVP-GUIDE.md` — Step-by-step implementation guide for the minimum viable product. Contains complete code for all 7 source files, build system, data structures, and a definition-of-done checklist.
-- `docs/MVP-PROMPTS.md` — 6 sequential copy-paste prompts to build the MVP. Each prompt is self-contained, references specific files and structures, and ends with `/code-check`. Follow with `/commit` after each passes.
-- `README.md` — User-facing plugin overview, installation, and usage.
+- `docs/RESEARCH.md` - Full technical research covering OBS API, Discord integration, YouTube/Twitch chat, donations, architecture decisions, data structures, and implementation roadmap.
+- `docs/MVP-GUIDE.md` - Step-by-step implementation guide for the minimum viable product. Contains complete code for all 7 source files, build system, data structures, and a definition-of-done checklist.
+- `docs/MVP-PROMPTS.md` - 6 sequential copy-paste prompts to build the MVP. Each prompt is self-contained, references specific files and structures, and ends with `/code-check`. Follow with `/commit` after each passes.
+- `README.md` - User-facing plugin overview, installation, and usage.
 
 ## CLI Skills
 
-- `/code-check` — Run a full code review of all staged/changed files. Checks for OBS API misuse, threading violations, memory leaks, and common pitfalls. Reports CRITICAL/WARNING/INFO issues with a PASS/FAIL verdict.
-- `/commit` — Stage changes, generate a detailed commit message with a full change log, and commit as Kiernen Irons. Never amends previous commits.
+- `/code-check` - Run a full code review of all staged/changed files. Checks for OBS API misuse, threading violations, memory leaks, and common pitfalls. Reports CRITICAL/WARNING/INFO issues with a PASS/FAIL verdict.
+- `/commit` - Stage changes, generate a detailed commit message with a full change log, and commit as Kiernen Irons. Never amends previous commits.
 
 ## Hooks
 
-- **Pre-commit code review** — Automatically runs before every `git commit`. An agent reviews all staged changes for critical OBS plugin issues (graphics thread violations, use-after-free, memory leaks, thread safety). Blocks the commit if critical issues are found.
+- **Pre-commit code review** - Automatically runs before every `git commit`. An agent reviews all staged changes for critical OBS plugin issues (graphics thread violations, use-after-free, memory leaks, thread safety). Blocks the commit if critical issues are found.
 
 ---
 
@@ -83,14 +83,14 @@ void obs_module_unload(void) {
 ### Properties UI
 
 - Build UIs with `obs_properties_create()` and `obs_properties_add_*()` functions
-- Never use platform-native GUI — always use the OBS properties API
+- Never use platform-native GUI - always use the OBS properties API
 - Property types: `bool`, `int`, `float`, `text`, `path`, `list`, `color`, `button`, `font`, `editable_list`, `group`
 
 ### Threading Rules
 
 - **Graphics calls** (`gs_*`) must only happen on the graphics thread (inside `video_render` or wrapped in `obs_enter_graphics()`/`obs_leave_graphics()`)
 - **UI property callbacks** run on the UI thread
-- **`update` callback** can be called from any thread — protect shared state with mutexes
+- **`update` callback** can be called from any thread - protect shared state with mutexes
 - Use `os_atomic_*` or `pthread_mutex_t` for thread safety, not platform-specific primitives
 
 ### Memory Management
@@ -98,11 +98,11 @@ void obs_module_unload(void) {
 - Use OBS allocators: `bmalloc`, `bfree`, `bstrdup`, `bzalloc` instead of standard malloc/free
 - Use `obs_data_t` ref counting: `obs_data_addref` / `obs_data_release`
 - Use `bfree()` for strings returned by OBS API calls that transfer ownership
-- Sources, scenes, and scene items are reference-counted — always release with the appropriate `_release()` call
+- Sources, scenes, and scene items are reference-counted - always release with the appropriate `_release()` call
 
 ### Logging
 
-- Use `blog(LOG_INFO, ...)`, `blog(LOG_WARNING, ...)`, `blog(LOG_ERROR, ...)` — never printf/stdout
+- Use `blog(LOG_INFO, ...)`, `blog(LOG_WARNING, ...)`, `blog(LOG_ERROR, ...)` - never printf/stdout
 - Prefix log messages with `[plugin-name]` for easy filtering
 
 ## Coding Standards
@@ -112,16 +112,16 @@ void obs_module_unload(void) {
 - Prefix all public symbols with the plugin name to avoid collisions (e.g., `credits_source_create`)
 - Keep platform-specific code behind `#ifdef _WIN32` / `#ifdef __APPLE__` / `#ifdef __linux__` guards
 - All user-visible strings must go through `obs_module_text("StringKey")` for localization
-- Do not use `extern "C"` blocks in .c files — only in .cpp files wrapping C API headers
+- Do not use `extern "C"` blocks in .c files - only in .cpp files wrapping C API headers
 
 ## Common Pitfalls
 
 - Never call `obs_source_release` on a source you don't own (didn't create or addref)
 - Never access `obs_data_t` settings after releasing them
-- Never call graphics functions outside the graphics thread — this will crash
+- Never call graphics functions outside the graphics thread - this will crash
 - Filter plugins must call `obs_source_process_filter_begin` / `obs_source_process_filter_end` for video processing
 - Always null-check return values from `obs_data_get_*` and `obs_source_get_*` families
-- On Windows, DLLs must export `obs_module_load` — ensure `OBS_DECLARE_MODULE()` is present and `CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS` or a .def file is used
+- On Windows, DLLs must export `obs_module_load` - ensure `OBS_DECLARE_MODULE()` is present and `CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS` or a .def file is used
 
 ## Testing
 

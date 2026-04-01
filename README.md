@@ -1,15 +1,15 @@
 # OBS Credits Plugin
 
-A customizable credits roll plugin for OBS Studio. Add professional, scrolling end credits to your streams and recordings — just like in movies and TV.
+A customizable credits roll plugin for OBS Studio. Add professional, scrolling end credits to your streams and recordings - just like in movies and TV.
 
 ## Features
 
-- **Scrolling credits roll** — Smooth, GPU-accelerated vertical scroll
-- **Customizable text** — Set titles, names, roles, and sections via OBS properties
-- **Styling options** — Font, size, color, alignment, and spacing controls
-- **Speed control** — Adjustable scroll speed to match your content
-- **Loop / one-shot modes** — Roll once and stop, or loop continuously
-- **Localization ready** — All UI strings support translation
+- **Scrolling credits roll** - Smooth, GPU-accelerated vertical scroll
+- **Customizable text** - Set titles, names, roles, and sections via OBS properties
+- **Styling options** - Font, size, color, alignment, and spacing controls
+- **Speed control** - Adjustable scroll speed to match your content
+- **Loop / one-shot modes** - Roll once and stop, or loop continuously
+- **Localization ready** - All UI strings support translation
 
 ## Installation
 
@@ -98,7 +98,7 @@ obs-credits/
 
 | Property       | Type   | Description                          | Default       |
 |---------------|--------|--------------------------------------|---------------|
-| Credits Text  | text   | The full credits content (multiline) | —             |
+| Credits Text  | text   | The full credits content (multiline) | -             |
 | Font          | font   | Font family and style                | System default|
 | Font Size     | int    | Text size in points                  | 36            |
 | Text Color    | color  | Text color                           | White         |
@@ -119,4 +119,4 @@ See [LICENSE](LICENSE) for details.
 
 ## Author
 
-**Kiernen Irons** — Design, development, and maintenance.
+**Kiernen Irons** - Design, development, and maintenance.

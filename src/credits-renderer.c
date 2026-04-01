@@ -145,7 +145,7 @@ struct credits_layout *credits_renderer_build(
 					 "credits_entry_%zu_%zu", s, e);
 				char combined[512];
 				snprintf(combined, sizeof(combined),
-					 "%s  \xe2\x80\x94  %s",
+					 "%s  -  %s",
 					 entry->name ? entry->name : "",
 					 entry->role ? entry->role : "");
 				le->type = ELEM_TEXT;
@@ -196,7 +196,8 @@ struct credits_layout *credits_renderer_build(
 				le->image = bzalloc(sizeof(gs_image_file3_t));
 				if (entry->image_path) {
 					gs_image_file3_init(le->image,
-							    entry->image_path);
+							    entry->image_path,
+							    GS_IMAGE_ALPHA_STRAIGHT);
 					gs_image_file3_init_texture(le->image);
 				}
 				le->image_width =

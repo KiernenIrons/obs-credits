@@ -1,4 +1,4 @@
-# OBS Credits Plugin — MVP Implementation Guide
+# OBS Credits Plugin - MVP Implementation Guide
 
 **Author:** Kiernen Irons
 **Date:** 2026-04-01
@@ -13,7 +13,7 @@ This guide defines the minimum viable product: a working OBS source that scrolls
 2. User points it at a `credits.json` file (or edits text directly in properties)
 3. The source renders scrolling text: section headings, name/role pairs, images
 4. User controls scroll speed, font, colors, and loop behavior from the properties panel
-5. Credits scroll upward like a movie — one-shot or looping
+5. Credits scroll upward like a movie - one-shot or looping
 
 **Explicitly NOT in the MVP:** Discord, live chat, donations, video clips, emoji images, companion service. Those are Phase 2+.
 
@@ -157,7 +157,7 @@ target_compile_definitions(obs-credits PRIVATE
 extern struct obs_source_info credits_source_info;
 ```
 
-### credits-source.c — The Core Struct
+### credits-source.c - The Core Struct
 
 This is the central state for one instance of the credits source:
 
@@ -542,7 +542,7 @@ struct credits_data *credits_parse_file(const char *path);
 void credits_data_free(struct credits_data *data);
 ```
 
-### credits-parser.c — Core Logic
+### credits-parser.c - Core Logic
 
 ```c
 #include "credits-parser.h"
@@ -763,7 +763,7 @@ void credits_renderer_draw(const struct credits_layout *layout,
 void credits_renderer_free(struct credits_layout *layout);
 ```
 
-### credits-renderer.c — Key Design
+### credits-renderer.c - Key Design
 
 Each "element" in the layout is one drawable thing at a specific Y position:
 
@@ -916,7 +916,7 @@ struct credits_layout *credits_renderer_build(
             case CREDITS_ENTRY_NAME_ROLE: {
                 /* "Name .... Role" as a single text source for now */
                 char buf[512];
-                snprintf(buf, sizeof(buf), "%s  —  %s",
+                snprintf(buf, sizeof(buf), "%s  -  %s",
                          ent->name ? ent->name : "",
                          ent->role ? ent->role : "");
                 snprintf(elem_name, sizeof(elem_name),
@@ -1097,7 +1097,7 @@ void credits_renderer_free(struct credits_layout *layout)
 - [ ] Credits scroll smoothly in OBS preview
 - [ ] Headings render in larger/colored text, names render in default style
 - [ ] Images render at correct size and centered position
-- [ ] Viewport culling works (elements offscreen aren't drawn — check GPU usage)
+- [ ] Viewport culling works (elements offscreen aren't drawn - check GPU usage)
 - [ ] Destroying the source frees all child sources and textures cleanly
 
 ---
@@ -1171,13 +1171,13 @@ All of these must pass before moving to Phase 2:
 - [ ] **Renders** headings, name/role pairs, name-only entries, freeform text, images
 - [ ] **Scrolls** smoothly at configurable speed, frame-rate independent
 - [ ] **Loops** or stops based on the Loop toggle
-- [ ] **Starts from below** — content scrolls up into view from the bottom
+- [ ] **Starts from below** - content scrolls up into view from the bottom
 - [ ] **Properties** work: file picker, scroll speed, loop, width/height, font, colors
-- [ ] **Hot-reload** — changing the credits file or settings updates the scroll live
-- [ ] **No crashes** — create/destroy cycles, empty files, missing files, malformed JSON all handled
-- [ ] **No leaks** — all child sources released, all textures freed, all strings bfree'd
-- [ ] **No thread violations** — all `gs_*` calls on graphics thread, mutex protects shared state
-- [ ] **Locale** — all UI strings go through `obs_module_text()`
+- [ ] **Hot-reload** - changing the credits file or settings updates the scroll live
+- [ ] **No crashes** - create/destroy cycles, empty files, missing files, malformed JSON all handled
+- [ ] **No leaks** - all child sources released, all textures freed, all strings bfree'd
+- [ ] **No thread violations** - all `gs_*` calls on graphics thread, mutex protects shared state
+- [ ] **Locale** - all UI strings go through `obs_module_text()`
 
 ---
 
@@ -1185,10 +1185,10 @@ All of these must pass before moving to Phase 2:
 
 Once the MVP is stable, the next priorities are:
 
-1. **Video clips** — add `CREDITS_ENTRY_CLIP` type, create `ffmpeg_source` children
-2. **Emoji** — test font-native emoji, fall back to image sprites if needed
-3. **Discord** — add libcurl + cJSON calls on a background thread, "Fetch" button
-4. **Better layout** — two-column name/role alignment, dot leaders, left/right alignment
-5. **Hotkey** — register an OBS hotkey to start/stop/reset the scroll
+1. **Video clips** - add `CREDITS_ENTRY_CLIP` type, create `ffmpeg_source` children
+2. **Emoji** - test font-native emoji, fall back to image sprites if needed
+3. **Discord** - add libcurl + cJSON calls on a background thread, "Fetch" button
+4. **Better layout** - two-column name/role alignment, dot leaders, left/right alignment
+5. **Hotkey** - register an OBS hotkey to start/stop/reset the scroll
 
 Each of these is additive and doesn't change the core architecture established in the MVP.
