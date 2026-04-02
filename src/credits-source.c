@@ -57,6 +57,12 @@ struct credits_source {
 	bool scrolling;
 	bool started;
 	bool waiting_loop;
+	bool paused;
+
+	/* Hotkeys */
+	obs_hotkey_id hotkey_start;
+	obs_hotkey_id hotkey_pause;
+	obs_hotkey_id hotkey_stop;
 
 	pthread_mutex_t mutex;
 };
@@ -330,6 +336,64 @@ static bool on_shadow_toggled(void *data, obs_properties_t *props,
 	return true;
 }
 
+/* ---- Hotkey callbacks ---- */
+
+static void credits_hotkey_start(void *data, obs_hotkey_id id,
+				 obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	if (!pressed)
+		return;
+
+	struct credits_source *ctx = data;
+	pthread_mutex_lock(&ctx->mutex);
+	ctx->scroll_offset = -(float)ctx->height;
+	ctx->current_speed = 0.0f;
+	ctx->delay_timer = 0.0f;
+	ctx->scrolling = true;
+	ctx->started = false;
+	ctx->paused = false;
+	ctx->waiting_loop = false;
+	ctx->layout = NULL;
+	pthread_mutex_unlock(&ctx->mutex);
+}
+
+static void credits_hotkey_pause(void *data, obs_hotkey_id id,
+				 obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	if (!pressed)
+		return;
+
+	struct credits_source *ctx = data;
+	pthread_mutex_lock(&ctx->mutex);
+	ctx->paused = !ctx->paused;
+	pthread_mutex_unlock(&ctx->mutex);
+}
+
+static void credits_hotkey_stop(void *data, obs_hotkey_id id,
+				obs_hotkey_t *hotkey, bool pressed)
+{
+	UNUSED_PARAMETER(id);
+	UNUSED_PARAMETER(hotkey);
+
+	if (!pressed)
+		return;
+
+	struct credits_source *ctx = data;
+	pthread_mutex_lock(&ctx->mutex);
+	ctx->scrolling = false;
+	ctx->started = false;
+	ctx->paused = false;
+	ctx->scroll_offset = 0.0f;
+	ctx->current_speed = 0.0f;
+	pthread_mutex_unlock(&ctx->mutex);
+}
+
 /* ---- Standard OBS source callbacks ---- */
 
 static const char *credits_get_name(void *type_data)
@@ -343,6 +407,20 @@ static void *credits_create(obs_data_t *settings, obs_source_t *source)
 	struct credits_source *ctx = bzalloc(sizeof(struct credits_source));
 	ctx->self = source;
 	pthread_mutex_init(&ctx->mutex, NULL);
+
+	ctx->hotkey_start = obs_hotkey_register_source(
+		source, "obs_credits.start",
+		obs_module_text("StartCredits"),
+		credits_hotkey_start, ctx);
+	ctx->hotkey_pause = obs_hotkey_register_source(
+		source, "obs_credits.pause",
+		obs_module_text("PauseCredits"),
+		credits_hotkey_pause, ctx);
+	ctx->hotkey_stop = obs_hotkey_register_source(
+		source, "obs_credits.stop",
+		obs_module_text("StopCredits"),
+		credits_hotkey_stop, ctx);
+
 	credits_update(ctx, settings);
 	return ctx;
 }
@@ -364,6 +442,10 @@ static void credits_destroy(void *data)
 	obs_enter_graphics();
 	gs_texrender_destroy(ctx->texrender);
 	obs_leave_graphics();
+
+	obs_hotkey_unregister(ctx->hotkey_start);
+	obs_hotkey_unregister(ctx->hotkey_pause);
+	obs_hotkey_unregister(ctx->hotkey_stop);
 
 	pthread_mutex_destroy(&ctx->mutex);
 	bfree(ctx->default_font_face);
@@ -585,6 +667,11 @@ static void credits_video_tick(void *data, float seconds)
 			ctx->scroll_offset = -(float)ctx->height;
 			ctx->delay_timer = 0.0f;
 			ctx->started = true;
+		}
+
+		if (ctx->paused) {
+			pthread_mutex_unlock(&ctx->mutex);
+			return;
 		}
 
 		/* Start delay */
