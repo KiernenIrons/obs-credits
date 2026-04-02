@@ -129,21 +129,15 @@ static void shift_section_keys(obs_data_t *settings, int dst, int src)
 	}
 }
 
-/* ---- Deferred properties rebuild ---- */
-
-/* obs_source_update_properties cannot be called from inside a button
- * callback because it destroys the properties panel while Qt is still
- * processing the click event, causing a use-after-free crash.
- * Instead, queue the rebuild on the UI thread so it runs after the
- * callback returns. */
-static void deferred_update_properties(void *param)
-{
-	obs_source_t *source = param;
-	obs_source_update_properties(source);
-}
-
 /* ---- Section add/remove button callbacks ---- */
 
+/*
+ * Button callbacks modify settings and return true.
+ * Returning true tells OBS to call get_properties() again and
+ * rebuild the properties panel with the updated section count.
+ * We must NOT call obs_source_update_properties here - that
+ * destroys the panel while Qt is still in the click handler.
+ */
 static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 			   void *data)
 {
@@ -154,33 +148,34 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 	obs_data_t *settings = obs_source_get_settings(ctx->self);
 
 	int count = (int)obs_data_get_int(settings, "section_count");
+	int new_idx = count;
 	obs_data_set_int(settings, "section_count", count + 1);
 
 	/* Clear all fields for the new section so it doesn't inherit
 	 * stale data from a previously removed section at this index */
 	char key[64];
-	snprintf(key, sizeof(key), "section_%d_heading", count);
+	snprintf(key, sizeof(key), "section_%d_heading", new_idx);
 	obs_data_set_string(settings, key, "");
-	snprintf(key, sizeof(key), "section_%d_subheading", count);
+	snprintf(key, sizeof(key), "section_%d_subheading", new_idx);
 	obs_data_set_string(settings, key, "");
-	snprintf(key, sizeof(key), "section_%d_names", count);
+	snprintf(key, sizeof(key), "section_%d_names", new_idx);
 	obs_data_set_string(settings, key, "");
-	snprintf(key, sizeof(key), "section_%d_roles", count);
+	snprintf(key, sizeof(key), "section_%d_roles", new_idx);
 	obs_data_set_string(settings, key, "");
-	snprintf(key, sizeof(key), "section_%d_alignment", count);
+	snprintf(key, sizeof(key), "section_%d_alignment", new_idx);
 	obs_data_set_string(settings, key, "center");
-	snprintf(key, sizeof(key), "section_%d_bold", count);
+	snprintf(key, sizeof(key), "section_%d_bold", new_idx);
 	obs_data_set_bool(settings, key, false);
-	snprintf(key, sizeof(key), "section_%d_italic", count);
+	snprintf(key, sizeof(key), "section_%d_italic", new_idx);
 	obs_data_set_bool(settings, key, false);
-	snprintf(key, sizeof(key), "section_%d_underline", count);
+	snprintf(key, sizeof(key), "section_%d_underline", new_idx);
 	obs_data_set_bool(settings, key, false);
 
+	/* Apply changed settings so update callback fires */
+	obs_source_update(ctx->self, settings);
 	obs_data_release(settings);
 
-	/* Defer properties rebuild to after this callback returns */
-	obs_queue_task(OBS_TASK_UI, deferred_update_properties, ctx->self,
-		       false);
+	/* Return true: OBS will call get_properties() to rebuild panel */
 	return true;
 }
 
@@ -210,11 +205,11 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 
 	obs_data_set_int(settings, "section_count", count - 1);
 
+	/* Apply changed settings so update callback fires */
+	obs_source_update(ctx->self, settings);
 	obs_data_release(settings);
 
-	/* Defer properties rebuild to after this callback returns */
-	obs_queue_task(OBS_TASK_UI, deferred_update_properties, ctx->self,
-		       false);
+	/* Return true: OBS will call get_properties() to rebuild panel */
 	return true;
 }
 
