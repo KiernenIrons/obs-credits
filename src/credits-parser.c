@@ -332,9 +332,12 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 		if (align && align[0] != '\0')
 			section->alignment = bstrdup(align);
 
-		/* Read per-field font pickers (size + flags from font obj) */
+		/* Read per-field font pickers (face + size + flags) */
 		const char *font_keys[] = {"heading_font", "sub_font",
 					   "entry_font"};
+		char **faces[] = {&section->heading_face,
+				  &section->sub_face,
+				  &section->entry_face};
 		int *sizes[] = {&section->heading_size, &section->sub_size,
 				&section->entry_size};
 		uint32_t *flags[] = {&section->heading_flags,
@@ -344,6 +347,10 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 			obs_data_t *fobj =
 				obs_data_get_obj(sec, font_keys[f]);
 			if (fobj) {
+				const char *face_str =
+					obs_data_get_string(fobj, "face");
+				if (face_str && face_str[0] != '\0')
+					*faces[f] = bstrdup(face_str);
 				*sizes[f] =
 					(int)obs_data_get_int(fobj, "size");
 				*flags[f] =
@@ -431,6 +438,9 @@ void credits_data_free(struct credits_data *data)
 		bfree(section->heading);
 		bfree(section->heading_font);
 		bfree(section->alignment);
+		bfree(section->heading_face);
+		bfree(section->sub_face);
+		bfree(section->entry_face);
 	}
 
 	bfree(data->sections);

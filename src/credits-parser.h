@@ -30,11 +30,14 @@ struct credits_section {
 	uint32_t heading_color;
 	char *alignment;
 
-	/* Per-field font size overrides (0 = use default) */
+	/* Per-field font overrides (NULL/0 = use default) */
+	char *heading_face;
 	int heading_size;
-	uint32_t heading_flags; /* Bold=1, Italic=2, Underline=4 */
+	uint32_t heading_flags; /* Bold=1, Italic=2, Underline=4, Strikeout=8 */
+	char *sub_face;
 	int sub_size;
 	uint32_t sub_flags;
+	char *entry_face;
 	int entry_size;
 	uint32_t entry_flags;
 

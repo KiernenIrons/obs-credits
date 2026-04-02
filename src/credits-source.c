@@ -731,11 +731,11 @@ static obs_properties_t *credits_get_properties(void *data)
 
 	/* Global spacing controls */
 	obs_properties_add_float(props, "field_spacing",
-				 obs_module_text("FieldSpacing"), -50.0, 500.0,
+				 obs_module_text("FieldSpacing"), -500.0, 500.0,
 				 1.0);
 
 	obs_properties_add_float(props, "section_spacing",
-				 obs_module_text("SectionSpacing"), -50.0, 500.0,
+				 obs_module_text("SectionSpacing"), -500.0, 500.0,
 				 1.0);
 
 	/* General settings */

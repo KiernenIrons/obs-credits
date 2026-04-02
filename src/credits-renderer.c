@@ -57,19 +57,14 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	obs_data_set_int(font_data, "size", font_size);
 
 	char style_str[64] = "";
-	int flags_int = 0;
-	if (font_flags & 1) {
-		flags_int |= 1;
+	int flags_int = (int)font_flags;
+
+	if (font_flags & 1)
 		strncat(style_str, "Bold ",
 			sizeof(style_str) - strlen(style_str) - 1);
-	}
-	if (font_flags & 2) {
-		flags_int |= 2;
+	if (font_flags & 2)
 		strncat(style_str, "Italic ",
 			sizeof(style_str) - strlen(style_str) - 1);
-	}
-	if (font_flags & 4)
-		flags_int |= 4;
 
 	size_t slen = strlen(style_str);
 	if (slen > 0 && style_str[slen - 1] == ' ')
@@ -231,11 +226,11 @@ struct credits_layout *credits_renderer_build(
 						    : "center";
 
 		/* --- Heading --- */
-		const char *h_font = section->heading_font
-					     ? section->heading_font
-					     : default_font;
-		/* Per-field heading size: use section->heading_size if > 0,
-		 * else heading_font_size from JSON style, else default */
+		const char *h_font = section->heading_face
+					     ? section->heading_face
+					     : (section->heading_font
+							? section->heading_font
+							: default_font);
 		int h_size = section->heading_size > 0
 				     ? section->heading_size
 				     : (section->heading_font_size > 0
@@ -286,9 +281,10 @@ struct credits_layout *credits_renderer_build(
 			const char *entry_text = NULL;
 			char combined[512];
 
-			/* Determine font size and flags based on entry type */
+			/* Determine font face, size, and flags based on entry type */
 			int e_size;
 			uint32_t e_flags;
+			const char *e_font;
 
 			switch (entry->type) {
 			case CREDITS_ENTRY_NAME_ROLE:
@@ -297,6 +293,9 @@ struct credits_layout *credits_renderer_build(
 					 entry->name ? entry->name : "",
 					 entry->role ? entry->role : "");
 				entry_text = combined;
+				e_font = section->entry_face
+						 ? section->entry_face
+						 : default_font;
 				e_size = section->entry_size > 0
 						 ? section->entry_size
 						 : default_font_size;
@@ -304,6 +303,9 @@ struct credits_layout *credits_renderer_build(
 				break;
 			case CREDITS_ENTRY_NAME_ONLY:
 				entry_text = entry->name ? entry->name : "";
+				e_font = section->entry_face
+						 ? section->entry_face
+						 : default_font;
 				e_size = section->entry_size > 0
 						 ? section->entry_size
 						 : default_font_size;
@@ -313,11 +315,17 @@ struct credits_layout *credits_renderer_build(
 				entry_text = entry->text ? entry->text : "";
 				/* Subheading is the first TEXT entry */
 				if (first_entry) {
+					e_font = section->sub_face
+							 ? section->sub_face
+							 : default_font;
 					e_size = section->sub_size > 0
 							 ? section->sub_size
 							 : default_font_size;
 					e_flags = section->sub_flags;
 				} else {
+					e_font = section->entry_face
+							 ? section->entry_face
+							 : default_font;
 					e_size = section->entry_size > 0
 							 ? section->entry_size
 							 : default_font_size;
@@ -367,7 +375,7 @@ struct credits_layout *credits_renderer_build(
 			le->type = ELEM_TEXT;
 			le->align = section_align_id;
 			le->text_source = make_text_source(
-				name_buf, entry_text, default_font,
+				name_buf, entry_text, e_font,
 				e_size, e_flags,
 				style->text_color, style->outline_enabled,
 				style->outline_size, style->outline_color);
@@ -381,7 +389,7 @@ struct credits_layout *credits_renderer_build(
 				snprintf(sname, sizeof(sname),
 					 "credits_sh_%zu_%zu", s, e);
 				le->shadow_source = make_text_source(
-					sname, entry_text, default_font,
+					sname, entry_text, e_font,
 					e_size, e_flags,
 					style->shadow_color, false, 0, 0);
 				le->shadow_off_x = style->shadow_offset_x;
