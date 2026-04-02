@@ -78,11 +78,10 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	obs_data_set_string(settings, "text", text ? text : "");
 	obs_data_set_obj(settings, "font", font_data);
 
-	/* Color: ensure full alpha. OBS color pickers give 0x00BBGGRR,
-	 * text_gdiplus expects 0xAABBGGRR. Force alpha to 0xFF. */
-	uint32_t color_with_alpha = (color & 0x00FFFFFF) | 0xFF000000;
-	obs_data_set_int(settings, "color1", (long long)color_with_alpha);
-	obs_data_set_int(settings, "color2", (long long)color_with_alpha);
+	/* text_gdiplus_v3 uses "color" (RGB, 0xRRGGBB format).
+	 * obs_properties_add_color returns RGB. Pass through directly. */
+	obs_data_set_int(settings, "color", (long long)(color & 0xFFFFFF));
+	obs_data_set_int(settings, "opacity", 100);
 	obs_data_set_bool(settings, "gradient", false);
 
 	/* No extents - text renders at natural size, no clipping.
@@ -92,8 +91,8 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	obs_data_set_bool(settings, "outline", outline_enabled);
 	if (outline_enabled) {
 		obs_data_set_int(settings, "outline_size", outline_size);
-		uint32_t oc = (outline_color & 0x00FFFFFF) | 0xFF000000;
-		obs_data_set_int(settings, "outline_color", (long long)oc);
+		obs_data_set_int(settings, "outline_color",
+				 (long long)(outline_color & 0xFFFFFF));
 		obs_data_set_int(settings, "outline_opacity", 100);
 	}
 

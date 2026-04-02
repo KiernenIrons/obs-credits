@@ -486,11 +486,10 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "width", 1920);
 	obs_data_set_default_int(settings, "height", 1080);
 
-	/* obs_properties_add_color uses 0x00BBGGRR (no alpha byte).
-	 * Gold (#FFD700): R=FF G=D7 B=00 -> 0x0000D7FF
-	 * White (#FFFFFF): -> 0x00FFFFFF */
+	/* obs_properties_add_color uses RGB (0x00RRGGBB).
+	 * Gold (#FFD700), White (#FFFFFF) */
 	obs_data_set_default_int(settings, "heading_color",
-				 (long long)0x0000D7FF);
+				 (long long)0x00FFD700);
 	obs_data_set_default_int(settings, "text_color",
 				 (long long)0x00FFFFFF);
 
@@ -504,7 +503,7 @@ static void credits_get_defaults(obs_data_t *settings)
 
 	obs_data_set_default_bool(settings, "shadow_enabled", false);
 	obs_data_set_default_int(settings, "shadow_color",
-				 (long long)0x00000000);
+				 (long long)0x00333333);
 	obs_data_set_default_double(settings, "shadow_offset_x", 2.0);
 	obs_data_set_default_double(settings, "shadow_offset_y", 2.0);
 
@@ -838,9 +837,6 @@ static obs_properties_t *credits_get_properties(void *data)
 
 	obs_properties_add_int(props, "height", obs_module_text("Height"), 480,
 			       2160, 1);
-
-	obs_properties_add_font(props, "font",
-				obs_module_text("DefaultFont"));
 
 	obs_properties_add_color(props, "heading_color",
 				 obs_module_text("HeadingColor"));
