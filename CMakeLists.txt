@@ -11,11 +11,12 @@ add_library(obs-credits MODULE
 	src/credits-source.c
 	src/credits-parser.c
 	src/credits-renderer.c
+	src/discord-fetch.c
 	deps/cJSON/cJSON.c
 )
 
-target_include_directories(obs-credits PRIVATE deps/cJSON)
-target_link_libraries(obs-credits PRIVATE OBS::libobs)
+target_include_directories(obs-credits PRIVATE deps/cJSON deps/curl)
+target_link_libraries(obs-credits PRIVATE OBS::libobs OBS::libcurl)
 target_compile_definitions(obs-credits PRIVATE OBS_CREDITS_VERSION="${PROJECT_VERSION}")
 
 # Platform-specific install rules

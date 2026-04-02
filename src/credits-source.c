@@ -1,6 +1,7 @@
 #include "credits-source.h"
 #include "credits-parser.h"
 #include "credits-renderer.h"
+#include "discord-fetch.h"
 
 #include <obs-module.h>
 #include <graphics/graphics.h>
@@ -63,6 +64,11 @@ struct credits_source {
 	obs_hotkey_id hotkey_start;
 	obs_hotkey_id hotkey_pause;
 	obs_hotkey_id hotkey_stop;
+
+	/* Discord - fetched data stored as text for injection into sections */
+	char *discord_boosters;     /* newline-separated names */
+	char *discord_role_members; /* newline-separated names */
+	bool discord_fetching;
 
 	pthread_mutex_t mutex;
 };
@@ -276,6 +282,152 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 	return true;
 }
 
+/* ---- Discord fetch (background thread) ---- */
+
+struct discord_fetch_args {
+	struct credits_source *ctx;
+	char *bot_token;
+	char *guild_id;
+	char *role_id;
+};
+
+static void *discord_fetch_thread(void *arg)
+{
+	struct discord_fetch_args *a = arg;
+	struct credits_source *ctx = a->ctx;
+
+	blog(LOG_INFO, "[obs-credits] Discord fetch started...");
+
+	struct discord_result *res =
+		discord_fetch(a->bot_token, a->guild_id, a->role_id);
+
+	if (res->error) {
+		blog(LOG_WARNING, "[obs-credits] Discord fetch error: %s",
+		     res->error);
+	} else {
+		/* Build newline-separated name lists */
+		size_t buf_size;
+		char *boosters_text = NULL;
+		char *role_text = NULL;
+
+		if (res->num_boosters > 0) {
+			buf_size = 0;
+			for (size_t i = 0; i < res->num_boosters; i++)
+				buf_size +=
+					strlen(res->boosters[i].display_name) +
+					1;
+			boosters_text = bmalloc(buf_size + 1);
+			boosters_text[0] = '\0';
+			for (size_t i = 0; i < res->num_boosters; i++) {
+				if (i > 0)
+					strcat(boosters_text, "\n");
+				strcat(boosters_text,
+				       res->boosters[i].display_name);
+			}
+		}
+
+		if (res->num_role_members > 0) {
+			buf_size = 0;
+			for (size_t i = 0; i < res->num_role_members; i++)
+				buf_size += strlen(
+						    res->role_members[i]
+							    .display_name) +
+					    1;
+			role_text = bmalloc(buf_size + 1);
+			role_text[0] = '\0';
+			for (size_t i = 0; i < res->num_role_members; i++) {
+				if (i > 0)
+					strcat(role_text, "\n");
+				strcat(role_text,
+				       res->role_members[i].display_name);
+			}
+		}
+
+		pthread_mutex_lock(&ctx->mutex);
+		bfree(ctx->discord_boosters);
+		bfree(ctx->discord_role_members);
+		ctx->discord_boosters = boosters_text;
+		ctx->discord_role_members = role_text;
+		pthread_mutex_unlock(&ctx->mutex);
+
+		blog(LOG_INFO,
+		     "[obs-credits] Discord fetch complete: %zu boosters, %zu role members",
+		     res->num_boosters, res->num_role_members);
+	}
+
+	discord_result_free(res);
+	bfree(a->bot_token);
+	bfree(a->guild_id);
+	bfree(a->role_id);
+	bfree(a);
+
+	pthread_mutex_lock(&ctx->mutex);
+	ctx->discord_fetching = false;
+	pthread_mutex_unlock(&ctx->mutex);
+
+	return NULL;
+}
+
+static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
+			     void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(prop);
+
+	struct credits_source *ctx = data;
+
+	pthread_mutex_lock(&ctx->mutex);
+	if (ctx->discord_fetching) {
+		pthread_mutex_unlock(&ctx->mutex);
+		return false;
+	}
+	ctx->discord_fetching = true;
+	pthread_mutex_unlock(&ctx->mutex);
+
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
+	const char *token = obs_data_get_string(settings, "discord_token");
+	const char *guild = obs_data_get_string(settings, "discord_guild_id");
+	const char *role = obs_data_get_string(settings, "discord_role_id");
+
+	struct discord_fetch_args *args =
+		bzalloc(sizeof(struct discord_fetch_args));
+	args->ctx = ctx;
+	args->bot_token = bstrdup(token);
+	args->guild_id = bstrdup(guild);
+	args->role_id = (role && role[0] != '\0') ? bstrdup(role) : NULL;
+
+	obs_data_release(settings);
+
+	pthread_t thread;
+	pthread_create(&thread, NULL, discord_fetch_thread, args);
+	pthread_detach(thread);
+
+	return false;
+}
+
+static bool on_discord_toggled(void *data, obs_properties_t *props,
+			       obs_property_t *prop, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(prop);
+	bool enabled = obs_data_get_bool(settings, "discord_enabled");
+	obs_property_set_visible(obs_properties_get(props, "discord_token"),
+				 enabled);
+	obs_property_set_visible(
+		obs_properties_get(props, "discord_guild_id"), enabled);
+	obs_property_set_visible(
+		obs_properties_get(props, "discord_role_id"), enabled);
+	obs_property_set_visible(
+		obs_properties_get(props, "discord_role_label"), enabled);
+	obs_property_set_visible(obs_properties_get(props, "discord_fetch"),
+				 enabled);
+	obs_property_set_visible(
+		obs_properties_get(props, "discord_booster_heading"), enabled);
+	obs_property_set_visible(
+		obs_properties_get(props, "discord_role_heading"), enabled);
+	return true;
+}
+
 /* ---- Section expand/collapse callback ---- */
 
 static bool on_section_expand_toggled(void *data, obs_properties_t *props,
@@ -449,6 +601,8 @@ static void credits_destroy(void *data)
 
 	pthread_mutex_destroy(&ctx->mutex);
 	bfree(ctx->default_font_face);
+	bfree(ctx->discord_boosters);
+	bfree(ctx->discord_role_members);
 	bfree(ctx);
 }
 
@@ -549,6 +703,46 @@ static void credits_update(void *data, obs_data_t *settings)
 	ctx->entry_spacing = (float)entry_sp;
 	ctx->section_spacing = (float)section_sp;
 
+	/* Inject Discord sections if data is available */
+	if (obs_data_get_bool(settings, "discord_enabled") &&
+	    (ctx->discord_boosters || ctx->discord_role_members)) {
+		obs_data_array_t *arr =
+			obs_data_get_array(tmp, "sections");
+		if (!arr)
+			arr = obs_data_array_create();
+
+		if (ctx->discord_boosters) {
+			obs_data_t *sec = obs_data_create();
+			obs_data_set_string(
+				sec, "heading",
+				obs_data_get_string(
+					settings,
+					"discord_booster_heading"));
+			obs_data_set_string(sec, "names",
+					    ctx->discord_boosters);
+			obs_data_set_string(sec, "alignment", "center");
+			obs_data_array_push_back(arr, sec);
+			obs_data_release(sec);
+		}
+
+		if (ctx->discord_role_members) {
+			obs_data_t *sec = obs_data_create();
+			obs_data_set_string(
+				sec, "heading",
+				obs_data_get_string(
+					settings,
+					"discord_role_heading"));
+			obs_data_set_string(sec, "names",
+					    ctx->discord_role_members);
+			obs_data_set_string(sec, "alignment", "center");
+			obs_data_array_push_back(arr, sec);
+			obs_data_release(sec);
+		}
+
+		obs_data_set_array(tmp, "sections", arr);
+		obs_data_array_release(arr);
+	}
+
 	ctx->data = credits_build_from_settings(tmp);
 
 	ctx->scroll_offset = 0.0f;
@@ -597,6 +791,12 @@ static void credits_get_defaults(obs_data_t *settings)
 
 	obs_data_set_default_double(settings, "start_delay", 0.0);
 	obs_data_set_default_double(settings, "loop_delay", 0.0);
+
+	obs_data_set_default_bool(settings, "discord_enabled", false);
+	obs_data_set_default_string(settings, "discord_booster_heading",
+				    "Server Boosters");
+	obs_data_set_default_string(settings, "discord_role_heading",
+				    "Moderators");
 
 	obs_data_set_default_double(settings, "heading_spacing", 0.0);
 	obs_data_set_default_double(settings, "sub_spacing", 0.0);
@@ -985,6 +1185,46 @@ static obs_properties_t *credits_get_properties(void *data)
 	obs_properties_add_float(props, "loop_delay",
 				 obs_module_text("LoopDelay"), 0.0, 30.0,
 				 0.5);
+
+	/* Discord integration */
+	obs_property_t *discord_cb = obs_properties_add_bool(
+		props, "discord_enabled",
+		obs_module_text("DiscordEnabled"));
+	obs_property_set_modified_callback2(discord_cb, on_discord_toggled,
+					    ctx);
+
+	obs_property_t *d_token = obs_properties_add_text(
+		props, "discord_token", obs_module_text("DiscordToken"),
+		OBS_TEXT_PASSWORD);
+	obs_property_t *d_guild = obs_properties_add_text(
+		props, "discord_guild_id",
+		obs_module_text("DiscordGuildID"), OBS_TEXT_DEFAULT);
+	obs_property_t *d_role = obs_properties_add_text(
+		props, "discord_role_id",
+		obs_module_text("DiscordRoleID"), OBS_TEXT_DEFAULT);
+	obs_property_t *d_role_lbl = obs_properties_add_text(
+		props, "discord_role_label",
+		obs_module_text("DiscordRoleLabel"), OBS_TEXT_INFO);
+
+	obs_property_t *d_bhead = obs_properties_add_text(
+		props, "discord_booster_heading",
+		obs_module_text("DiscordBoosterHeading"), OBS_TEXT_DEFAULT);
+	obs_property_t *d_rhead = obs_properties_add_text(
+		props, "discord_role_heading",
+		obs_module_text("DiscordRoleHeading"), OBS_TEXT_DEFAULT);
+
+	obs_property_t *d_fetch = obs_properties_add_button2(
+		props, "discord_fetch", obs_module_text("DiscordFetch"),
+		on_discord_fetch, ctx);
+
+	bool d_on = obs_data_get_bool(settings, "discord_enabled");
+	obs_property_set_visible(d_token, d_on);
+	obs_property_set_visible(d_guild, d_on);
+	obs_property_set_visible(d_role, d_on);
+	obs_property_set_visible(d_role_lbl, d_on);
+	obs_property_set_visible(d_fetch, d_on);
+	obs_property_set_visible(d_bhead, d_on);
+	obs_property_set_visible(d_rhead, d_on);
 
 	obs_data_release(settings);
 
