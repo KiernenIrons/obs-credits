@@ -44,6 +44,7 @@ struct credits_layout {
 static obs_source_t *make_text_source(const char *name, const char *text,
 				      const char *font_face, int font_size,
 				      uint32_t font_flags, uint32_t color,
+				      const char *align, uint32_t viewport_width,
 				      bool outline_enabled, int outline_size,
 				      uint32_t outline_color)
 {
@@ -88,8 +89,13 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	obs_data_set_int(settings, "color2", (long long)color_with_alpha);
 	obs_data_set_bool(settings, "gradient", false);
 
-	/* No extents mode - let text render at its natural size without
-	 * clipping. Alignment is handled by positioning in the renderer. */
+	/* Extents mode: text source gets a fixed width matching the viewport
+	 * so alignment (left/center/right) works within that width.
+	 * Wrap is off so long text won't word-wrap. Height is automatic. */
+	obs_data_set_bool(settings, "extents", true);
+	obs_data_set_int(settings, "extents_cx", viewport_width);
+	obs_data_set_bool(settings, "extents_wrap", false);
+	obs_data_set_string(settings, "align", align ? align : "center");
 
 	/* Outline */
 	obs_data_set_bool(settings, "outline", outline_enabled);
@@ -221,13 +227,13 @@ struct credits_layout *credits_renderer_build(
 
 		struct layout_elem *he = &layout->elems[elem_idx++];
 		he->type = ELEM_TEXT;
+		he->x = 0.0f;
 		he->text_source = make_text_source(
 			name_buf, heading_text, h_font, h_size, h_flags,
-			h_color, style->outline_enabled, style->outline_size,
+			h_color, section_align, viewport_width,
+			style->outline_enabled, style->outline_size,
 			style->outline_color);
 		he->height = text_source_height(he->text_source, h_size);
-		he->x = compute_x(section_align, vw,
-				   text_source_width(he->text_source, h_size));
 		he->y = y_cursor;
 
 		if (style->shadow_enabled) {
@@ -236,7 +242,9 @@ struct credits_layout *credits_renderer_build(
 				 "credits_heading_%zu_sh", s);
 			he->shadow_source = make_text_source(
 				sname, heading_text, h_font, h_size,
-				h_flags, style->shadow_color, false, 0, 0);
+				h_flags, style->shadow_color,
+				section_align, viewport_width,
+				false, 0, 0);
 			he->shadow_off_x = style->shadow_offset_x;
 			he->shadow_off_y = style->shadow_offset_y;
 		}
@@ -331,17 +339,15 @@ struct credits_layout *credits_renderer_build(
 			snprintf(name_buf, sizeof(name_buf),
 				 "credits_entry_%zu_%zu", s, e);
 			le->type = ELEM_TEXT;
+			le->x = 0.0f;
 			le->text_source = make_text_source(
 				name_buf, entry_text, default_font,
 				e_size, e_flags,
-				style->text_color, style->outline_enabled,
+				style->text_color, section_align,
+				viewport_width, style->outline_enabled,
 				style->outline_size, style->outline_color);
 			le->height = text_source_height(le->text_source,
 							e_size);
-			le->x = compute_x(section_align, vw,
-					   text_source_width(
-						   le->text_source,
-						   e_size));
 			le->y = y_cursor;
 
 			if (style->shadow_enabled) {
@@ -351,7 +357,8 @@ struct credits_layout *credits_renderer_build(
 				le->shadow_source = make_text_source(
 					sname, entry_text, default_font,
 					e_size, e_flags,
-					style->shadow_color, false, 0, 0);
+					style->shadow_color, section_align,
+					viewport_width, false, 0, 0);
 				le->shadow_off_x = style->shadow_offset_x;
 				le->shadow_off_y = style->shadow_offset_y;
 			}
