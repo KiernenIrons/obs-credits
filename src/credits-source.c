@@ -389,7 +389,7 @@ static void credits_hotkey_stop(void *data, obs_hotkey_id id,
 	ctx->scrolling = false;
 	ctx->started = false;
 	ctx->paused = false;
-	ctx->scroll_offset = 0.0f;
+	ctx->scroll_offset = -(float)ctx->height;
 	ctx->current_speed = 0.0f;
 	pthread_mutex_unlock(&ctx->mutex);
 }
