@@ -148,9 +148,10 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 	snprintf(key, sizeof(key), "section_%d_alignment", count);
 	obs_data_set_string(settings, key, "center");
 
-	/* Trigger update so the new section appears immediately */
-	obs_source_update(ctx->self, settings);
 	obs_data_release(settings);
+
+	/* Force full properties panel rebuild */
+	obs_source_update_properties(ctx->self);
 	return true;
 }
 
@@ -180,8 +181,10 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 
 	obs_data_set_int(settings, "section_count", count - 1);
 
-	obs_source_update(ctx->self, settings);
 	obs_data_release(settings);
+
+	/* Force full properties panel rebuild */
+	obs_source_update_properties(ctx->self);
 	return true;
 }
 
