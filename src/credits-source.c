@@ -222,6 +222,10 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 		obs_data_release(fobj);
 	}
 
+	/* Ensure the group checkbox is checked (expanded) */
+	snprintf(key, sizeof(key), "section_%d_group", new_idx);
+	obs_data_set_bool(settings, key, true);
+
 	/* Show the newly visible section group */
 	set_section_visibility(props, new_idx, true);
 	update_remove_buttons(props, count + 1);
@@ -482,6 +486,13 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "entry_spacing", 0.0);
 	obs_data_set_default_double(settings, "section_spacing", 0.0);
 
+	/* Default all section groups to checked (expanded) */
+	for (int i = 0; i < MAX_SECTIONS; i++) {
+		char key[64];
+		snprintf(key, sizeof(key), "section_%d_group", i);
+		obs_data_set_default_bool(settings, key, true);
+	}
+
 	/* Set default font objects for first section so the font picker
 	 * dialog starts at a reasonable size instead of tiny system default */
 	const char *def_font_keys[] = {"section_0_heading_font",
@@ -731,7 +742,7 @@ static obs_properties_t *credits_get_properties(void *data)
 		obs_property_set_visible(rm, i < count && count > 1);
 
 		obs_property_t *gp = obs_properties_add_group(
-			props, group_name, label, OBS_GROUP_NORMAL, group);
+			props, group_name, label, OBS_GROUP_CHECKABLE, group);
 		obs_property_set_visible(gp, i < count);
 	}
 
