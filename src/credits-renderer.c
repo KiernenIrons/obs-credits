@@ -109,6 +109,12 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	obs_source_t *source =
 		obs_source_create_private(text_source_id, name, settings);
 
+	/* Force the source to process its settings and calculate dimensions.
+	 * Without this, obs_source_get_width/height return 0 because
+	 * the source hasn't processed its text yet. */
+	if (source)
+		obs_source_update(source, settings);
+
 	obs_data_release(settings);
 	obs_data_release(font_data);
 
