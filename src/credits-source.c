@@ -129,67 +129,93 @@ static void shift_section_keys(obs_data_t *settings, int dst, int src)
 	}
 }
 
-/* ---- Section add/remove button callbacks ---- */
+/* ---- Section add/remove via visibility toggling ---- */
 
 /*
- * Button callbacks modify settings and return true.
- * Returning true tells OBS to call get_properties() again and
- * rebuild the properties panel with the updated section count.
- * We must NOT call obs_source_update_properties here - that
- * destroys the panel while Qt is still in the click handler.
+ * OBS does not rebuild the properties panel structure when a button
+ * callback returns true - it only refreshes values and visibility.
+ * Calling obs_source_update_properties crashes Qt (use-after-free).
+ *
+ * Solution: pre-create all section groups (up to MAX_SECTIONS) in
+ * get_properties and hide the unused ones. Add/remove just changes
+ * section_count and toggles visibility. No panel rebuild needed.
  */
+#define MAX_SECTIONS 20
+
+static void set_section_visibility(obs_properties_t *props, int idx,
+				   bool visible)
+{
+	char key[64];
+	snprintf(key, sizeof(key), "section_%d_group", idx);
+	obs_property_t *p = obs_properties_get(props, key);
+	if (p)
+		obs_property_set_visible(p, visible);
+}
+
+static void update_remove_buttons(obs_properties_t *props, int count)
+{
+	/* Show remove buttons only when count > 1 */
+	for (int i = 0; i < MAX_SECTIONS; i++) {
+		char key[64];
+		snprintf(key, sizeof(key), "section_%d_remove", i);
+		obs_property_t *p = obs_properties_get(props, key);
+		if (p)
+			obs_property_set_visible(p, i < count && count > 1);
+	}
+}
+
 static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 			   void *data)
 {
-	UNUSED_PARAMETER(props);
 	UNUSED_PARAMETER(prop);
 
 	struct credits_source *ctx = data;
 	obs_data_t *settings = obs_source_get_settings(ctx->self);
 
 	int count = (int)obs_data_get_int(settings, "section_count");
+	if (count >= MAX_SECTIONS) {
+		obs_data_release(settings);
+		return false;
+	}
+
 	int new_idx = count;
 	obs_data_set_int(settings, "section_count", count + 1);
 
-	/* Clear all fields for the new section so it doesn't inherit
-	 * stale data from a previously removed section at this index */
+	/* Clear fields for new section */
 	char key[64];
-	snprintf(key, sizeof(key), "section_%d_heading", new_idx);
-	obs_data_set_string(settings, key, "");
-	snprintf(key, sizeof(key), "section_%d_subheading", new_idx);
-	obs_data_set_string(settings, key, "");
-	snprintf(key, sizeof(key), "section_%d_names", new_idx);
-	obs_data_set_string(settings, key, "");
-	snprintf(key, sizeof(key), "section_%d_roles", new_idx);
-	obs_data_set_string(settings, key, "");
+	const char *str_fields[] = {"heading", "subheading", "names", "roles"};
+	for (int f = 0; f < 4; f++) {
+		snprintf(key, sizeof(key), "section_%d_%s", new_idx,
+			 str_fields[f]);
+		obs_data_set_string(settings, key, "");
+	}
 	snprintf(key, sizeof(key), "section_%d_alignment", new_idx);
 	obs_data_set_string(settings, key, "center");
-	snprintf(key, sizeof(key), "section_%d_bold", new_idx);
-	obs_data_set_bool(settings, key, false);
-	snprintf(key, sizeof(key), "section_%d_italic", new_idx);
-	obs_data_set_bool(settings, key, false);
-	snprintf(key, sizeof(key), "section_%d_underline", new_idx);
-	obs_data_set_bool(settings, key, false);
+	const char *bool_fields[] = {"bold", "italic", "underline"};
+	for (int f = 0; f < 3; f++) {
+		snprintf(key, sizeof(key), "section_%d_%s", new_idx,
+			 bool_fields[f]);
+		obs_data_set_bool(settings, key, false);
+	}
 
-	/* Apply changed settings so update callback fires */
+	/* Show the newly visible section group */
+	set_section_visibility(props, new_idx, true);
+	update_remove_buttons(props, count + 1);
+
 	obs_source_update(ctx->self, settings);
 	obs_data_release(settings);
-
-	/* Return true: OBS will call get_properties() to rebuild panel */
 	return true;
 }
 
 static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 			      void *data)
 {
-	UNUSED_PARAMETER(props);
-
 	struct credits_source *ctx = data;
 	obs_data_t *settings = obs_source_get_settings(ctx->self);
 
-	const char *name = obs_property_name(prop);
+	const char *pname = obs_property_name(prop);
 	int idx = 0;
-	if (sscanf(name, "section_%d_remove", &idx) != 1) {
+	if (sscanf(pname, "section_%d_remove", &idx) != 1) {
 		obs_data_release(settings);
 		return false;
 	}
@@ -200,16 +226,18 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 		return false;
 	}
 
+	/* Shift data from sections after idx down by one */
 	for (int i = idx; i < count - 1; i++)
 		shift_section_keys(settings, i, i + 1);
 
 	obs_data_set_int(settings, "section_count", count - 1);
 
-	/* Apply changed settings so update callback fires */
+	/* Hide the last section group (now unused) */
+	set_section_visibility(props, count - 1, false);
+	update_remove_buttons(props, count - 1);
+
 	obs_source_update(ctx->self, settings);
 	obs_data_release(settings);
-
-	/* Return true: OBS will call get_properties() to rebuild panel */
 	return true;
 }
 
@@ -567,10 +595,13 @@ static obs_properties_t *credits_get_properties(void *data)
 	obs_properties_t *props = obs_properties_create();
 
 	int count = (int)obs_data_get_int(settings, "section_count");
-	if (count < 0)
-		count = 0;
+	if (count < 1)
+		count = 1;
 
-	for (int i = 0; i < count; i++) {
+	/* Pre-create all section groups up to MAX_SECTIONS.
+	 * Only the first `count` are visible. Add/remove toggles visibility
+	 * without rebuilding the panel (which would crash Qt). */
+	for (int i = 0; i < MAX_SECTIONS; i++) {
 		char group_name[64], heading_name[64], sub_name[64];
 		char names_name[64], roles_name[64], align_name[64];
 		char bold_name[64], italic_name[64], underline_name[64];
@@ -633,16 +664,15 @@ static obs_properties_t *credits_get_properties(void *data)
 		obs_properties_add_bool(group, underline_name,
 					obs_module_text("Underline"));
 
-		/* Only show remove button if there are multiple sections */
-		if (count > 1) {
-			obs_properties_add_button2(
-				group, remove_name,
-				obs_module_text("RemoveSection"),
-				on_remove_section, ctx);
-		}
+		obs_property_t *rm = obs_properties_add_button2(
+			group, remove_name,
+			obs_module_text("RemoveSection"),
+			on_remove_section, ctx);
+		obs_property_set_visible(rm, i < count && count > 1);
 
-		obs_properties_add_group(props, group_name, label,
-					 OBS_GROUP_NORMAL, group);
+		obs_property_t *gp = obs_properties_add_group(
+			props, group_name, label, OBS_GROUP_NORMAL, group);
+		obs_property_set_visible(gp, i < count);
 	}
 
 	obs_properties_add_button2(props, "add_section",
