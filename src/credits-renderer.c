@@ -96,7 +96,7 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	 * itself, so left/center/right alignment has no visible effect. */
 	obs_data_set_bool(settings, "extents", true);
 	obs_data_set_int(settings, "extents_cx", viewport_width);
-	obs_data_set_bool(settings, "extents_wrap", true);
+	obs_data_set_bool(settings, "extents_wrap", false);
 	obs_data_set_string(settings, "align", align);
 	obs_data_set_string(settings, "valign", "top");
 

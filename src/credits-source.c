@@ -204,13 +204,20 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 	snprintf(key, sizeof(key), "section_%d_alignment", new_idx);
 	obs_data_set_string(settings, key, "center");
 
-	/* Clear per-field font pickers (no override = use global default) */
+	/* Set reasonable default font objects for new section */
 	const char *font_fields[] = {"heading_font", "sub_font",
 				     "entry_font"};
+	int def_sizes[] = {72, 36, 36};
 	for (int f = 0; f < 3; f++) {
 		snprintf(key, sizeof(key), "section_%d_%s", new_idx,
 			 font_fields[f]);
-		obs_data_erase(settings, key);
+		obs_data_t *fobj = obs_data_create();
+		obs_data_set_string(fobj, "face", "Arial");
+		obs_data_set_int(fobj, "size", def_sizes[f]);
+		obs_data_set_int(fobj, "flags", 0);
+		obs_data_set_string(fobj, "style", "Regular");
+		obs_data_set_obj(settings, key, fobj);
+		obs_data_release(fobj);
 	}
 
 	/* Show the newly visible section group */
@@ -466,6 +473,22 @@ static void credits_get_defaults(obs_data_t *settings)
 
 	obs_data_set_default_double(settings, "field_spacing", 0.0);
 	obs_data_set_default_double(settings, "section_spacing", 0.0);
+
+	/* Set default font objects for first section so the font picker
+	 * dialog starts at a reasonable size instead of tiny system default */
+	const char *def_font_keys[] = {"section_0_heading_font",
+				       "section_0_sub_font",
+				       "section_0_entry_font"};
+	int def_sizes[] = {72, 36, 36};
+	for (int i = 0; i < 3; i++) {
+		obs_data_t *fobj = obs_data_create();
+		obs_data_set_string(fobj, "face", "Arial");
+		obs_data_set_int(fobj, "size", def_sizes[i]);
+		obs_data_set_int(fobj, "flags", 0);
+		obs_data_set_string(fobj, "style", "Regular");
+		obs_data_set_default_obj(settings, def_font_keys[i], fobj);
+		obs_data_release(fobj);
+	}
 }
 
 static void credits_video_tick(void *data, float seconds)
