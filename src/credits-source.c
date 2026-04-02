@@ -41,7 +41,9 @@ struct credits_source {
 	float delay_timer;
 
 	/* Spacing settings */
-	float field_spacing;
+	float heading_spacing;
+	float sub_spacing;
+	float entry_spacing;
 	float section_spacing;
 
 	/* State */
@@ -377,7 +379,9 @@ static void credits_update(void *data, obs_data_t *settings)
 	double start_del = obs_data_get_double(settings, "start_delay");
 	double loop_del = obs_data_get_double(settings, "loop_delay");
 
-	double field_sp = obs_data_get_double(settings, "field_spacing");
+	double heading_sp = obs_data_get_double(settings, "heading_spacing");
+	double sub_sp = obs_data_get_double(settings, "sub_spacing");
+	double entry_sp = obs_data_get_double(settings, "entry_spacing");
 	double section_sp = obs_data_get_double(settings, "section_spacing");
 
 	obs_data_array_t *arr = settings_to_sections_array(settings);
@@ -420,7 +424,9 @@ static void credits_update(void *data, obs_data_t *settings)
 	ctx->loop_delay = (float)loop_del;
 	ctx->delay_timer = 0.0f;
 
-	ctx->field_spacing = (float)field_sp;
+	ctx->heading_spacing = (float)heading_sp;
+	ctx->sub_spacing = (float)sub_sp;
+	ctx->entry_spacing = (float)entry_sp;
 	ctx->section_spacing = (float)section_sp;
 
 	ctx->data = credits_build_from_settings(tmp);
@@ -471,7 +477,9 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "start_delay", 0.0);
 	obs_data_set_default_double(settings, "loop_delay", 0.0);
 
-	obs_data_set_default_double(settings, "field_spacing", 0.0);
+	obs_data_set_default_double(settings, "heading_spacing", 0.0);
+	obs_data_set_default_double(settings, "sub_spacing", 0.0);
+	obs_data_set_default_double(settings, "entry_spacing", 0.0);
 	obs_data_set_default_double(settings, "section_spacing", 0.0);
 
 	/* Set default font objects for first section so the font picker
@@ -513,7 +521,9 @@ static void credits_video_tick(void *data, float seconds)
 		style.shadow_color = ctx->shadow_color;
 		style.shadow_offset_x = ctx->shadow_offset_x;
 		style.shadow_offset_y = ctx->shadow_offset_y;
-		style.field_spacing = ctx->field_spacing;
+		style.heading_spacing = ctx->heading_spacing;
+		style.sub_spacing = ctx->sub_spacing;
+		style.entry_spacing = ctx->entry_spacing;
 		style.section_spacing = ctx->section_spacing;
 
 		ctx->layout = credits_renderer_build(ctx->data, ctx->width,
@@ -730,13 +740,21 @@ static obs_properties_t *credits_get_properties(void *data)
 				   on_add_section, ctx);
 
 	/* Global spacing controls */
-	obs_properties_add_float(props, "field_spacing",
-				 obs_module_text("FieldSpacing"), -500.0, 500.0,
-				 1.0);
+	obs_properties_add_float(props, "heading_spacing",
+				 obs_module_text("HeadingSpacing"), -9999.0,
+				 9999.0, 1.0);
+
+	obs_properties_add_float(props, "sub_spacing",
+				 obs_module_text("SubSpacing"), -9999.0,
+				 9999.0, 1.0);
+
+	obs_properties_add_float(props, "entry_spacing",
+				 obs_module_text("EntrySpacing"), -9999.0,
+				 9999.0, 1.0);
 
 	obs_properties_add_float(props, "section_spacing",
-				 obs_module_text("SectionSpacing"), -500.0, 500.0,
-				 1.0);
+				 obs_module_text("SectionSpacing"), -9999.0,
+				 9999.0, 1.0);
 
 	/* General settings */
 	obs_properties_add_float(props, "scroll_speed",

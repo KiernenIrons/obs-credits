@@ -210,13 +210,22 @@ struct credits_layout *credits_renderer_build(
 					? style->default_font_size
 					: 32;
 
-	/* Spacing: use custom if > 0, otherwise auto-calculate */
-	float entry_gap = style->field_spacing > 0.0f
-				  ? style->field_spacing
-				  : calc_entry_gap(default_font_size);
-	float section_gap = style->section_spacing > 0.0f
+	/* Spacing: 0 = auto-calculate, any non-zero value used directly */
+	float auto_entry = calc_entry_gap(default_font_size);
+	float auto_section = calc_section_gap(default_font_size);
+
+	float heading_gap = style->heading_spacing != 0.0f
+				    ? style->heading_spacing
+				    : auto_entry * 2.0f;
+	float sub_gap = style->sub_spacing != 0.0f
+				? style->sub_spacing
+				: auto_entry;
+	float entry_gap = style->entry_spacing != 0.0f
+				  ? style->entry_spacing
+				  : auto_entry;
+	float section_gap = style->section_spacing != 0.0f
 				    ? style->section_spacing
-				    : calc_section_gap(default_font_size);
+				    : auto_section;
 
 	for (size_t s = 0; s < data->num_sections; s++) {
 		const struct credits_section *section = &data->sections[s];
@@ -270,7 +279,7 @@ struct credits_layout *credits_renderer_build(
 			he->shadow_off_y = style->shadow_offset_y;
 		}
 
-		y_cursor += he->height + entry_gap * 2.0f;
+		y_cursor += he->height + heading_gap;
 
 		/* --- Entries --- */
 		bool first_entry = true;
@@ -396,7 +405,9 @@ struct credits_layout *credits_renderer_build(
 				le->shadow_off_y = style->shadow_offset_y;
 			}
 
-			y_cursor += le->height + entry_gap;
+			/* Use sub_gap after subheading, entry_gap for everything else */
+			y_cursor += le->height +
+				    (first_entry ? sub_gap : entry_gap);
 			first_entry = false;
 		}
 
