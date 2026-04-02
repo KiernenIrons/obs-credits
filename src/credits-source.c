@@ -129,6 +129,19 @@ static void shift_section_keys(obs_data_t *settings, int dst, int src)
 	}
 }
 
+/* ---- Deferred properties rebuild ---- */
+
+/* obs_source_update_properties cannot be called from inside a button
+ * callback because it destroys the properties panel while Qt is still
+ * processing the click event, causing a use-after-free crash.
+ * Instead, queue the rebuild on the UI thread so it runs after the
+ * callback returns. */
+static void deferred_update_properties(void *param)
+{
+	obs_source_t *source = param;
+	obs_source_update_properties(source);
+}
+
 /* ---- Section add/remove button callbacks ---- */
 
 static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
@@ -165,8 +178,9 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 
 	obs_data_release(settings);
 
-	/* Force full properties panel rebuild */
-	obs_source_update_properties(ctx->self);
+	/* Defer properties rebuild to after this callback returns */
+	obs_queue_task(OBS_TASK_UI, deferred_update_properties, ctx->self,
+		       false);
 	return true;
 }
 
@@ -198,8 +212,9 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 
 	obs_data_release(settings);
 
-	/* Force full properties panel rebuild */
-	obs_source_update_properties(ctx->self);
+	/* Defer properties rebuild to after this callback returns */
+	obs_queue_task(OBS_TASK_UI, deferred_update_properties, ctx->self,
+		       false);
 	return true;
 }
 
