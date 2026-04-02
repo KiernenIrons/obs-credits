@@ -18,6 +18,7 @@ struct layout_elem {
 	float y;
 	float height;
 	float x;
+	int align; /* 0=center, 1=left, 2=right */
 	obs_source_t *text_source;
 	obs_source_t *shadow_source;
 	float shadow_off_x;
@@ -31,6 +32,7 @@ struct credits_layout {
 	struct layout_elem *elems;
 	size_t num_elems;
 	float total_height;
+	float viewport_width;
 };
 
 /*
@@ -140,13 +142,30 @@ static float text_source_width(obs_source_t *source, int font_size,
 	return (float)font_size * 0.6f * (float)len;
 }
 
-static float compute_x(const char *align, float viewport_w, float elem_w)
+static int align_from_string(const char *align)
 {
 	if (!align || strcmp(align, "center") == 0)
-		return (viewport_w - elem_w) / 2.0f;
+		return 0;
+	if (strcmp(align, "left") == 0)
+		return 1;
 	if (strcmp(align, "right") == 0)
-		return viewport_w - elem_w;
-	return 0.0f; /* left */
+		return 2;
+	return 0;
+}
+
+static float compute_x_live(int align, float vw, obs_source_t *source)
+{
+	float w = (float)obs_source_get_width(source);
+	if (w <= 0.0f)
+		return 0.0f; /* not yet rendered, left-align as fallback */
+	switch (align) {
+	case 1:
+		return 0.0f; /* left */
+	case 2:
+		return vw - w; /* right */
+	default:
+		return (vw - w) / 2.0f; /* center */
+	}
 }
 
 static float calc_entry_gap(int font_size)
@@ -232,16 +251,17 @@ struct credits_layout *credits_renderer_build(
 
 		snprintf(name_buf, sizeof(name_buf), "credits_heading_%zu", s);
 
+		int section_align_id = align_from_string(section_align);
+
 		struct layout_elem *he = &layout->elems[elem_idx++];
 		he->type = ELEM_TEXT;
+		he->align = section_align_id;
 		he->text_source = make_text_source(
 			name_buf, heading_text, h_font, h_size, h_flags,
 			h_color, style->outline_enabled, style->outline_size,
 			style->outline_color);
 		he->height = text_source_height(he->text_source, h_size);
-		he->x = compute_x(section_align, vw,
-				   text_source_width(he->text_source, h_size,
-						     heading_text));
+		he->x = 0.0f;
 		he->y = y_cursor;
 
 		if (style->shadow_enabled) {
@@ -345,6 +365,7 @@ struct credits_layout *credits_renderer_build(
 			snprintf(name_buf, sizeof(name_buf),
 				 "credits_entry_%zu_%zu", s, e);
 			le->type = ELEM_TEXT;
+			le->align = section_align_id;
 			le->text_source = make_text_source(
 				name_buf, entry_text, default_font,
 				e_size, e_flags,
@@ -352,10 +373,7 @@ struct credits_layout *credits_renderer_build(
 				style->outline_size, style->outline_color);
 			le->height = text_source_height(le->text_source,
 							e_size);
-			le->x = compute_x(section_align, vw,
-					   text_source_width(
-						   le->text_source,
-						   e_size, entry_text));
+			le->x = 0.0f;
 			le->y = y_cursor;
 
 			if (style->shadow_enabled) {
@@ -384,6 +402,7 @@ struct credits_layout *credits_renderer_build(
 	}
 
 	layout->total_height = y_cursor;
+	layout->viewport_width = vw;
 
 	blog(LOG_INFO,
 	     "[obs-credits] Layout built: %zu elements, total height %.0f px",
@@ -421,17 +440,24 @@ void credits_renderer_draw(const struct credits_layout *layout,
 			if (!e->text_source)
 				break;
 
+			/* Compute x from real source width every frame.
+			 * At build time width is 0; by draw time the
+			 * source has rendered and reports its true width. */
+			float x = compute_x_live(e->align,
+						 layout->viewport_width,
+						 e->text_source);
+
 			if (e->shadow_source) {
 				gs_matrix_push();
 				gs_matrix_translate3f(
-					e->x + e->shadow_off_x,
+					x + e->shadow_off_x,
 					e->y + e->shadow_off_y, 0.0f);
 				obs_source_video_render(e->shadow_source);
 				gs_matrix_pop();
 			}
 
 			gs_matrix_push();
-			gs_matrix_translate3f(e->x, e->y, 0.0f);
+			gs_matrix_translate3f(x, e->y, 0.0f);
 			obs_source_video_render(e->text_source);
 			gs_matrix_pop();
 			break;
