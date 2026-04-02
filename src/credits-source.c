@@ -742,7 +742,7 @@ static obs_properties_t *credits_get_properties(void *data)
 		obs_property_set_visible(rm, i < count && count > 1);
 
 		obs_property_t *gp = obs_properties_add_group(
-			props, group_name, label, OBS_GROUP_CHECKABLE, group);
+			props, group_name, label, OBS_GROUP_NORMAL, group);
 		obs_property_set_visible(gp, i < count);
 	}
 
