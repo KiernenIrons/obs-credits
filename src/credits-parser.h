@@ -29,7 +29,15 @@ struct credits_section {
 	int heading_font_size;
 	uint32_t heading_color;
 	char *alignment;
-	uint32_t font_flags;
+
+	/* Per-field font size overrides (0 = use default) */
+	int heading_size;
+	uint32_t heading_flags; /* Bold=1, Italic=2, Underline=4 */
+	int sub_size;
+	uint32_t sub_flags;
+	int entry_size;
+	uint32_t entry_flags;
+
 	struct credits_entry *entries;
 	size_t num_entries;
 };

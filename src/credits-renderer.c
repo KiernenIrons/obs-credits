@@ -176,27 +176,36 @@ struct credits_layout *credits_renderer_build(
 					? style->default_font_size
 					: 32;
 
+	/* Spacing: use custom if > 0, otherwise auto-calculate */
+	float entry_gap = style->field_spacing > 0.0f
+				  ? style->field_spacing
+				  : calc_entry_gap(default_font_size);
+	float section_gap = style->section_spacing > 0.0f
+				    ? style->section_spacing
+				    : calc_section_gap(default_font_size);
+
 	for (size_t s = 0; s < data->num_sections; s++) {
 		const struct credits_section *section = &data->sections[s];
 
 		const char *section_align = section->alignment
 						    ? section->alignment
 						    : "center";
-		uint32_t section_flags = section->font_flags;
-
-		float entry_gap = calc_entry_gap(default_font_size);
-		float section_gap = calc_section_gap(default_font_size);
 
 		/* --- Heading --- */
 		const char *h_font = section->heading_font
 					     ? section->heading_font
 					     : default_font;
-		int h_size = section->heading_font_size > 0
-				     ? section->heading_font_size
-				     : default_font_size;
+		/* Per-field heading size: use section->heading_size if > 0,
+		 * else heading_font_size from JSON style, else default */
+		int h_size = section->heading_size > 0
+				     ? section->heading_size
+				     : (section->heading_font_size > 0
+						? section->heading_font_size
+						: default_font_size);
 		uint32_t h_color = section->heading_color != 0
 					   ? section->heading_color
 					   : style->heading_color;
+		uint32_t h_flags = section->heading_flags;
 
 		const char *heading_text =
 			section->heading ? section->heading : "";
@@ -208,7 +217,7 @@ struct credits_layout *credits_renderer_build(
 		/* With extents, text fills viewport width. Position at x=0. */
 		he->x = 0.0f;
 		he->text_source = make_text_source(
-			name_buf, heading_text, h_font, h_size, section_flags,
+			name_buf, heading_text, h_font, h_size, h_flags,
 			h_color, section_align, viewport_width,
 			style->outline_enabled, style->outline_size,
 			style->outline_color);
@@ -221,7 +230,7 @@ struct credits_layout *credits_renderer_build(
 				 "credits_heading_%zu_sh", s);
 			he->shadow_source = make_text_source(
 				sname, heading_text, h_font, h_size,
-				section_flags, style->shadow_color,
+				h_flags, style->shadow_color,
 				section_align, viewport_width, false, 0, 0);
 			he->shadow_off_x = style->shadow_offset_x;
 			he->shadow_off_y = style->shadow_offset_y;
@@ -230,12 +239,17 @@ struct credits_layout *credits_renderer_build(
 		y_cursor += he->height + entry_gap * 2.0f;
 
 		/* --- Entries --- */
+		bool first_entry = true;
 		for (size_t e = 0; e < section->num_entries; e++) {
 			const struct credits_entry *entry =
 				&section->entries[e];
 			struct layout_elem *le = &layout->elems[elem_idx++];
 			const char *entry_text = NULL;
 			char combined[512];
+
+			/* Determine font size and flags based on entry type */
+			int e_size;
+			uint32_t e_flags;
 
 			switch (entry->type) {
 			case CREDITS_ENTRY_NAME_ROLE:
@@ -244,12 +258,32 @@ struct credits_layout *credits_renderer_build(
 					 entry->name ? entry->name : "",
 					 entry->role ? entry->role : "");
 				entry_text = combined;
+				e_size = section->entry_size > 0
+						 ? section->entry_size
+						 : default_font_size;
+				e_flags = section->entry_flags;
 				break;
 			case CREDITS_ENTRY_NAME_ONLY:
 				entry_text = entry->name ? entry->name : "";
+				e_size = section->entry_size > 0
+						 ? section->entry_size
+						 : default_font_size;
+				e_flags = section->entry_flags;
 				break;
 			case CREDITS_ENTRY_TEXT:
 				entry_text = entry->text ? entry->text : "";
+				/* Subheading is the first TEXT entry */
+				if (first_entry) {
+					e_size = section->sub_size > 0
+							 ? section->sub_size
+							 : default_font_size;
+					e_flags = section->sub_flags;
+				} else {
+					e_size = section->entry_size > 0
+							 ? section->entry_size
+							 : default_font_size;
+					e_flags = section->entry_flags;
+				}
 				break;
 			case CREDITS_ENTRY_IMAGE:
 				le->type = ELEM_IMAGE;
@@ -272,6 +306,7 @@ struct credits_layout *credits_renderer_build(
 				le->x = 0.0f;
 				le->y = y_cursor;
 				y_cursor += le->height + entry_gap;
+				first_entry = false;
 				continue;
 			case CREDITS_ENTRY_SPACER:
 				le->type = ELEM_SPACER;
@@ -279,7 +314,12 @@ struct credits_layout *credits_renderer_build(
 				le->x = 0.0f;
 				le->y = y_cursor;
 				y_cursor += le->height + entry_gap;
+				first_entry = false;
 				continue;
+			default:
+				e_size = default_font_size;
+				e_flags = 0;
+				break;
 			}
 
 			/* Text entry (NAME_ROLE, NAME_ONLY, TEXT) */
@@ -289,12 +329,12 @@ struct credits_layout *credits_renderer_build(
 			le->x = 0.0f;
 			le->text_source = make_text_source(
 				name_buf, entry_text, default_font,
-				default_font_size, section_flags,
+				e_size, e_flags,
 				style->text_color, section_align,
 				viewport_width, style->outline_enabled,
 				style->outline_size, style->outline_color);
 			le->height = text_source_height(le->text_source,
-							default_font_size);
+							e_size);
 			le->y = y_cursor;
 
 			if (style->shadow_enabled) {
@@ -303,7 +343,7 @@ struct credits_layout *credits_renderer_build(
 					 "credits_sh_%zu_%zu", s, e);
 				le->shadow_source = make_text_source(
 					sname, entry_text, default_font,
-					default_font_size, section_flags,
+					e_size, e_flags,
 					style->shadow_color, section_align,
 					viewport_width, false, 0, 0);
 				le->shadow_off_x = style->shadow_offset_x;
@@ -311,6 +351,7 @@ struct credits_layout *credits_renderer_build(
 			}
 
 			y_cursor += le->height + entry_gap;
+			first_entry = false;
 		}
 
 		/* --- Section gap spacer --- */

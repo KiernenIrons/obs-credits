@@ -84,6 +84,25 @@ static void parse_entry(const cJSON *json, struct credits_entry *entry)
 		entry->spacer_height = 40;
 }
 
+static uint32_t parse_font_flags_json(const cJSON *json,
+				      const char *bold_key,
+				      const char *italic_key,
+				      const char *underline_key)
+{
+	uint32_t flags = 0;
+	const cJSON *bold_item = cJSON_GetObjectItem(json, bold_key);
+	const cJSON *italic_item = cJSON_GetObjectItem(json, italic_key);
+	const cJSON *underline_item = cJSON_GetObjectItem(json, underline_key);
+
+	if (cJSON_IsBool(bold_item) && cJSON_IsTrue(bold_item))
+		flags |= 1;
+	if (cJSON_IsBool(italic_item) && cJSON_IsTrue(italic_item))
+		flags |= 2;
+	if (cJSON_IsBool(underline_item) && cJSON_IsTrue(underline_item))
+		flags |= 4;
+	return flags;
+}
+
 static void parse_section(const cJSON *json, struct credits_section *section)
 {
 	const cJSON *heading_item = cJSON_GetObjectItem(json, "heading");
@@ -114,18 +133,26 @@ static void parse_section(const cJSON *json, struct credits_section *section)
 		}
 	}
 
-	/* Parse font flags from JSON */
-	const cJSON *bold_item = cJSON_GetObjectItem(json, "bold");
-	const cJSON *italic_item = cJSON_GetObjectItem(json, "italic");
-	const cJSON *underline_item = cJSON_GetObjectItem(json, "underline");
+	/* Parse per-field font flags from JSON */
+	section->heading_flags = parse_font_flags_json(
+		json, "heading_bold", "heading_italic", "heading_underline");
+	section->sub_flags = parse_font_flags_json(
+		json, "sub_bold", "sub_italic", "sub_underline");
+	section->entry_flags = parse_font_flags_json(
+		json, "entry_bold", "entry_italic", "entry_underline");
 
-	section->font_flags = 0;
-	if (cJSON_IsBool(bold_item) && cJSON_IsTrue(bold_item))
-		section->font_flags |= 1;
-	if (cJSON_IsBool(italic_item) && cJSON_IsTrue(italic_item))
-		section->font_flags |= 2;
-	if (cJSON_IsBool(underline_item) && cJSON_IsTrue(underline_item))
-		section->font_flags |= 4;
+	/* Parse per-field font sizes */
+	const cJSON *hs = cJSON_GetObjectItem(json, "heading_size");
+	if (cJSON_IsNumber(hs))
+		section->heading_size = hs->valueint;
+
+	const cJSON *ss = cJSON_GetObjectItem(json, "sub_size");
+	if (cJSON_IsNumber(ss))
+		section->sub_size = ss->valueint;
+
+	const cJSON *es = cJSON_GetObjectItem(json, "entry_size");
+	if (cJSON_IsNumber(es))
+		section->entry_size = es->valueint;
 
 	const cJSON *entries_arr = cJSON_GetObjectItem(json, "entries");
 	if (cJSON_IsArray(entries_arr)) {
@@ -252,6 +279,21 @@ static char *get_line(const char *text, size_t line_idx)
 	return line;
 }
 
+static uint32_t build_flags_from_bools(obs_data_t *sec,
+					const char *bold_key,
+					const char *italic_key,
+					const char *underline_key)
+{
+	uint32_t flags = 0;
+	if (obs_data_get_bool(sec, bold_key))
+		flags |= 1;
+	if (obs_data_get_bool(sec, italic_key))
+		flags |= 2;
+	if (obs_data_get_bool(sec, underline_key))
+		flags |= 4;
+	return flags;
+}
+
 struct credits_data *credits_build_from_settings(obs_data_t *settings)
 {
 	if (!settings)
@@ -290,17 +332,23 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 		if (align && align[0] != '\0')
 			section->alignment = bstrdup(align);
 
-		/* Read font flags (bold/italic/underline) */
-		bool bold = obs_data_get_bool(sec, "bold");
-		bool italic = obs_data_get_bool(sec, "italic");
-		bool underline = obs_data_get_bool(sec, "underline");
-		section->font_flags = 0;
-		if (bold)
-			section->font_flags |= 1;
-		if (italic)
-			section->font_flags |= 2;
-		if (underline)
-			section->font_flags |= 4;
+		/* Read per-field font sizes */
+		section->heading_size =
+			(int)obs_data_get_int(sec, "heading_size");
+		section->sub_size =
+			(int)obs_data_get_int(sec, "sub_size");
+		section->entry_size =
+			(int)obs_data_get_int(sec, "entry_size");
+
+		/* Read per-field font flags */
+		section->heading_flags = build_flags_from_bools(
+			sec, "heading_bold", "heading_italic",
+			"heading_underline");
+		section->sub_flags = build_flags_from_bools(
+			sec, "sub_bold", "sub_italic", "sub_underline");
+		section->entry_flags = build_flags_from_bools(
+			sec, "entry_bold", "entry_italic",
+			"entry_underline");
 
 		/* Count entries: subheading (if present) + name/role lines */
 		size_t name_lines = count_lines(names);

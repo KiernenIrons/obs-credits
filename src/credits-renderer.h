@@ -18,6 +18,8 @@ struct credits_style {
 	uint32_t shadow_color;
 	float shadow_offset_x;
 	float shadow_offset_y;
+	float field_spacing;   /* gap between entries, 0 = auto */
+	float section_spacing; /* gap between sections, 0 = auto */
 };
 
 struct credits_layout *credits_renderer_build(

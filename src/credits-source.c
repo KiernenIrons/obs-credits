@@ -40,6 +40,10 @@ struct credits_source {
 	float loop_delay;
 	float delay_timer;
 
+	/* Spacing settings */
+	float field_spacing;
+	float section_spacing;
+
 	/* State */
 	struct credits_data *data;
 	struct credits_layout *layout;
@@ -89,16 +93,54 @@ settings_to_sections_array(obs_data_t *settings)
 		obs_data_set_string(sec, "alignment",
 				    obs_data_get_string(settings, key));
 
-		snprintf(key, sizeof(key), "section_%d_bold", i);
-		obs_data_set_bool(sec, "bold",
+		/* Per-field font sizes */
+		snprintf(key, sizeof(key), "section_%d_heading_size", i);
+		obs_data_set_int(sec, "heading_size",
+				 obs_data_get_int(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_sub_size", i);
+		obs_data_set_int(sec, "sub_size",
+				 obs_data_get_int(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_entry_size", i);
+		obs_data_set_int(sec, "entry_size",
+				 obs_data_get_int(settings, key));
+
+		/* Per-field bold/italic/underline */
+		snprintf(key, sizeof(key), "section_%d_heading_bold", i);
+		obs_data_set_bool(sec, "heading_bold",
 				  obs_data_get_bool(settings, key));
 
-		snprintf(key, sizeof(key), "section_%d_italic", i);
-		obs_data_set_bool(sec, "italic",
+		snprintf(key, sizeof(key), "section_%d_heading_italic", i);
+		obs_data_set_bool(sec, "heading_italic",
 				  obs_data_get_bool(settings, key));
 
-		snprintf(key, sizeof(key), "section_%d_underline", i);
-		obs_data_set_bool(sec, "underline",
+		snprintf(key, sizeof(key), "section_%d_heading_underline", i);
+		obs_data_set_bool(sec, "heading_underline",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_sub_bold", i);
+		obs_data_set_bool(sec, "sub_bold",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_sub_italic", i);
+		obs_data_set_bool(sec, "sub_italic",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_sub_underline", i);
+		obs_data_set_bool(sec, "sub_underline",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_entry_bold", i);
+		obs_data_set_bool(sec, "entry_bold",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_entry_italic", i);
+		obs_data_set_bool(sec, "entry_italic",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_entry_underline", i);
+		obs_data_set_bool(sec, "entry_underline",
 				  obs_data_get_bool(settings, key));
 
 		obs_data_array_push_back(arr, sec);
@@ -120,8 +162,20 @@ static void shift_section_keys(obs_data_t *settings, int dst, int src)
 		obs_data_set_string(settings, dk,
 				    obs_data_get_string(settings, sk));
 	}
-	const char *bools[] = {"bold", "italic", "underline"};
+
+	const char *int_fields[] = {"heading_size", "sub_size", "entry_size"};
 	for (int f = 0; f < 3; f++) {
+		snprintf(sk, sizeof(sk), "section_%d_%s", src, int_fields[f]);
+		snprintf(dk, sizeof(dk), "section_%d_%s", dst, int_fields[f]);
+		obs_data_set_int(settings, dk,
+				 obs_data_get_int(settings, sk));
+	}
+
+	const char *bools[] = {"heading_bold", "heading_italic",
+			       "heading_underline", "sub_bold", "sub_italic",
+			       "sub_underline", "entry_bold", "entry_italic",
+			       "entry_underline"};
+	for (int f = 0; f < 9; f++) {
 		snprintf(sk, sizeof(sk), "section_%d_%s", src, bools[f]);
 		snprintf(dk, sizeof(dk), "section_%d_%s", dst, bools[f]);
 		obs_data_set_bool(settings, dk,
@@ -191,8 +245,22 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 	}
 	snprintf(key, sizeof(key), "section_%d_alignment", new_idx);
 	obs_data_set_string(settings, key, "center");
-	const char *bool_fields[] = {"bold", "italic", "underline"};
+
+	/* Clear per-field sizes (0 = use default) */
+	const char *size_fields[] = {"heading_size", "sub_size", "entry_size"};
 	for (int f = 0; f < 3; f++) {
+		snprintf(key, sizeof(key), "section_%d_%s", new_idx,
+			 size_fields[f]);
+		obs_data_set_int(settings, key, 0);
+	}
+
+	/* Clear per-field bold/italic/underline */
+	const char *bool_fields[] = {"heading_bold", "heading_italic",
+				     "heading_underline", "sub_bold",
+				     "sub_italic", "sub_underline",
+				     "entry_bold", "entry_italic",
+				     "entry_underline"};
+	for (int f = 0; f < 9; f++) {
 		snprintf(key, sizeof(key), "section_%d_%s", new_idx,
 			 bool_fields[f]);
 		obs_data_set_bool(settings, key, false);
@@ -355,6 +423,9 @@ static void credits_update(void *data, obs_data_t *settings)
 	double start_del = obs_data_get_double(settings, "start_delay");
 	double loop_del = obs_data_get_double(settings, "loop_delay");
 
+	double field_sp = obs_data_get_double(settings, "field_spacing");
+	double section_sp = obs_data_get_double(settings, "section_spacing");
+
 	obs_data_array_t *arr = settings_to_sections_array(settings);
 
 	obs_data_t *tmp = obs_data_create();
@@ -394,6 +465,9 @@ static void credits_update(void *data, obs_data_t *settings)
 	ctx->start_delay = (float)start_del;
 	ctx->loop_delay = (float)loop_del;
 	ctx->delay_timer = 0.0f;
+
+	ctx->field_spacing = (float)field_sp;
+	ctx->section_spacing = (float)section_sp;
 
 	ctx->data = credits_build_from_settings(tmp);
 
@@ -442,6 +516,9 @@ static void credits_get_defaults(obs_data_t *settings)
 
 	obs_data_set_default_double(settings, "start_delay", 0.0);
 	obs_data_set_default_double(settings, "loop_delay", 0.0);
+
+	obs_data_set_default_double(settings, "field_spacing", 0.0);
+	obs_data_set_default_double(settings, "section_spacing", 0.0);
 }
 
 static void credits_video_tick(void *data, float seconds)
@@ -466,6 +543,8 @@ static void credits_video_tick(void *data, float seconds)
 		style.shadow_color = ctx->shadow_color;
 		style.shadow_offset_x = ctx->shadow_offset_x;
 		style.shadow_offset_y = ctx->shadow_offset_y;
+		style.field_spacing = ctx->field_spacing;
+		style.section_spacing = ctx->section_spacing;
 
 		ctx->layout = credits_renderer_build(ctx->data, ctx->width,
 						     &style);
@@ -604,8 +683,17 @@ static obs_properties_t *credits_get_properties(void *data)
 	for (int i = 0; i < MAX_SECTIONS; i++) {
 		char group_name[64], heading_name[64], sub_name[64];
 		char names_name[64], roles_name[64], align_name[64];
-		char bold_name[64], italic_name[64], underline_name[64];
 		char remove_name[64], label[64];
+
+		char heading_size_name[64];
+		char heading_bold_name[64], heading_italic_name[64],
+			heading_underline_name[64];
+		char sub_size_name[64];
+		char sub_bold_name[64], sub_italic_name[64],
+			sub_underline_name[64];
+		char entry_size_name[64];
+		char entry_bold_name[64], entry_italic_name[64],
+			entry_underline_name[64];
 
 		snprintf(group_name, sizeof(group_name), "section_%d_group",
 			 i);
@@ -619,26 +707,77 @@ static obs_properties_t *credits_get_properties(void *data)
 			 i);
 		snprintf(align_name, sizeof(align_name),
 			 "section_%d_alignment", i);
-		snprintf(bold_name, sizeof(bold_name), "section_%d_bold", i);
-		snprintf(italic_name, sizeof(italic_name),
-			 "section_%d_italic", i);
-		snprintf(underline_name, sizeof(underline_name),
-			 "section_%d_underline", i);
 		snprintf(remove_name, sizeof(remove_name),
 			 "section_%d_remove", i);
 		snprintf(label, sizeof(label), "%s %d",
 			 obs_module_text("Section"), i + 1);
 
+		snprintf(heading_size_name, sizeof(heading_size_name),
+			 "section_%d_heading_size", i);
+		snprintf(heading_bold_name, sizeof(heading_bold_name),
+			 "section_%d_heading_bold", i);
+		snprintf(heading_italic_name, sizeof(heading_italic_name),
+			 "section_%d_heading_italic", i);
+		snprintf(heading_underline_name,
+			 sizeof(heading_underline_name),
+			 "section_%d_heading_underline", i);
+
+		snprintf(sub_size_name, sizeof(sub_size_name),
+			 "section_%d_sub_size", i);
+		snprintf(sub_bold_name, sizeof(sub_bold_name),
+			 "section_%d_sub_bold", i);
+		snprintf(sub_italic_name, sizeof(sub_italic_name),
+			 "section_%d_sub_italic", i);
+		snprintf(sub_underline_name, sizeof(sub_underline_name),
+			 "section_%d_sub_underline", i);
+
+		snprintf(entry_size_name, sizeof(entry_size_name),
+			 "section_%d_entry_size", i);
+		snprintf(entry_bold_name, sizeof(entry_bold_name),
+			 "section_%d_entry_bold", i);
+		snprintf(entry_italic_name, sizeof(entry_italic_name),
+			 "section_%d_entry_italic", i);
+		snprintf(entry_underline_name, sizeof(entry_underline_name),
+			 "section_%d_entry_underline", i);
+
 		obs_properties_t *group = obs_properties_create();
 
+		/* Heading text */
 		obs_properties_add_text(group, heading_name,
 					obs_module_text("Heading"),
 					OBS_TEXT_DEFAULT);
 
+		/* Heading size */
+		obs_properties_add_int(group, heading_size_name,
+				       obs_module_text("HeadingSize"), 0, 500,
+				       1);
+
+		/* Heading B/I/U */
+		obs_properties_add_bool(group, heading_bold_name,
+					obs_module_text("HeadingBold"));
+		obs_properties_add_bool(group, heading_italic_name,
+					obs_module_text("HeadingItalic"));
+		obs_properties_add_bool(group, heading_underline_name,
+					obs_module_text("HeadingUnderline"));
+
+		/* Sub-heading text */
 		obs_properties_add_text(group, sub_name,
 					obs_module_text("Subheading"),
 					OBS_TEXT_DEFAULT);
 
+		/* Sub-heading size */
+		obs_properties_add_int(group, sub_size_name,
+				       obs_module_text("SubSize"), 0, 500, 1);
+
+		/* Sub-heading B/I/U */
+		obs_properties_add_bool(group, sub_bold_name,
+					obs_module_text("SubBold"));
+		obs_properties_add_bool(group, sub_italic_name,
+					obs_module_text("SubItalic"));
+		obs_properties_add_bool(group, sub_underline_name,
+					obs_module_text("SubUnderline"));
+
+		/* Names and Roles */
 		obs_properties_add_text(group, names_name,
 					obs_module_text("Names"),
 					OBS_TEXT_MULTILINE);
@@ -647,6 +786,20 @@ static obs_properties_t *credits_get_properties(void *data)
 					obs_module_text("Roles"),
 					OBS_TEXT_MULTILINE);
 
+		/* Entry size */
+		obs_properties_add_int(group, entry_size_name,
+				       obs_module_text("EntrySize"), 0, 500,
+				       1);
+
+		/* Entry B/I/U */
+		obs_properties_add_bool(group, entry_bold_name,
+					obs_module_text("EntryBold"));
+		obs_properties_add_bool(group, entry_italic_name,
+					obs_module_text("EntryItalic"));
+		obs_properties_add_bool(group, entry_underline_name,
+					obs_module_text("EntryUnderline"));
+
+		/* Alignment */
 		obs_property_t *align_prop = obs_properties_add_list(
 			group, align_name, obs_module_text("Alignment"),
 			OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
@@ -657,13 +810,7 @@ static obs_properties_t *credits_get_properties(void *data)
 		obs_property_list_add_string(
 			align_prop, obs_module_text("AlignRight"), "right");
 
-		obs_properties_add_bool(group, bold_name,
-					obs_module_text("Bold"));
-		obs_properties_add_bool(group, italic_name,
-					obs_module_text("Italic"));
-		obs_properties_add_bool(group, underline_name,
-					obs_module_text("Underline"));
-
+		/* Remove button */
 		obs_property_t *rm = obs_properties_add_button2(
 			group, remove_name,
 			obs_module_text("RemoveSection"),
@@ -678,6 +825,15 @@ static obs_properties_t *credits_get_properties(void *data)
 	obs_properties_add_button2(props, "add_section",
 				   obs_module_text("AddSection"),
 				   on_add_section, ctx);
+
+	/* Global spacing controls */
+	obs_properties_add_float(props, "field_spacing",
+				 obs_module_text("FieldSpacing"), 0.0, 200.0,
+				 1.0);
+
+	obs_properties_add_float(props, "section_spacing",
+				 obs_module_text("SectionSpacing"), 0.0, 500.0,
+				 5.0);
 
 	/* General settings */
 	obs_properties_add_float(props, "scroll_speed",
