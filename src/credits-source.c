@@ -66,8 +66,8 @@ struct credits_source {
 	obs_hotkey_id hotkey_stop;
 
 	/* Discord - fetched data stored as text for injection into sections */
-	char *discord_boosters;     /* newline-separated names */
-	char *discord_role_members; /* newline-separated names */
+	char *discord_boosters;                    /* newline-separated names */
+	char *discord_roles[DISCORD_MAX_ROLES];    /* newline-separated names per role */
 	bool discord_fetching;
 
 	pthread_mutex_t mutex;
@@ -288,8 +288,30 @@ struct discord_fetch_args {
 	struct credits_source *ctx;
 	char *bot_token;
 	char *guild_id;
-	char *role_id;
+	char *role_ids[DISCORD_MAX_ROLES];
 };
+
+/* Helper: build a newline-separated string from a discord_member array.
+ * Returns NULL if there are no members. Caller must bfree the result. */
+static char *members_to_text(const struct discord_member *members,
+			     size_t count)
+{
+	if (count == 0)
+		return NULL;
+
+	size_t buf_size = 0;
+	for (size_t i = 0; i < count; i++)
+		buf_size += strlen(members[i].display_name) + 1; /* +1 for \n */
+
+	char *text = bmalloc(buf_size + 1);
+	text[0] = '\0';
+	for (size_t i = 0; i < count; i++) {
+		if (i > 0)
+			strcat(text, "\n");
+		strcat(text, members[i].display_name);
+	}
+	return text;
+}
 
 static void *discord_fetch_thread(void *arg)
 {
@@ -298,67 +320,52 @@ static void *discord_fetch_thread(void *arg)
 
 	blog(LOG_INFO, "[obs-credits] Discord fetch started...");
 
+	/* Pass the const char* array to discord_fetch */
+	const char *role_id_ptrs[DISCORD_MAX_ROLES];
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++)
+		role_id_ptrs[i] = a->role_ids[i]; /* NULL if not set */
+
 	struct discord_result *res =
-		discord_fetch(a->bot_token, a->guild_id, a->role_id);
+		discord_fetch(a->bot_token, a->guild_id, role_id_ptrs);
 
 	if (res->error) {
 		blog(LOG_WARNING, "[obs-credits] Discord fetch error: %s",
 		     res->error);
 	} else {
-		/* Build newline-separated name lists */
-		size_t buf_size;
-		char *boosters_text = NULL;
-		char *role_text = NULL;
+		char *boosters_text =
+			members_to_text(res->boosters, res->num_boosters);
 
-		if (res->num_boosters > 0) {
-			buf_size = 0;
-			for (size_t i = 0; i < res->num_boosters; i++)
-				buf_size +=
-					strlen(res->boosters[i].display_name) +
-					1;
-			boosters_text = bmalloc(buf_size + 1);
-			boosters_text[0] = '\0';
-			for (size_t i = 0; i < res->num_boosters; i++) {
-				if (i > 0)
-					strcat(boosters_text, "\n");
-				strcat(boosters_text,
-				       res->boosters[i].display_name);
-			}
-		}
-
-		if (res->num_role_members > 0) {
-			buf_size = 0;
-			for (size_t i = 0; i < res->num_role_members; i++)
-				buf_size += strlen(
-						    res->role_members[i]
-							    .display_name) +
-					    1;
-			role_text = bmalloc(buf_size + 1);
-			role_text[0] = '\0';
-			for (size_t i = 0; i < res->num_role_members; i++) {
-				if (i > 0)
-					strcat(role_text, "\n");
-				strcat(role_text,
-				       res->role_members[i].display_name);
-			}
+		char *role_texts[DISCORD_MAX_ROLES];
+		for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+			role_texts[i] =
+				members_to_text(res->roles[i].members,
+						res->roles[i].num_members);
 		}
 
 		pthread_mutex_lock(&ctx->mutex);
 		bfree(ctx->discord_boosters);
-		bfree(ctx->discord_role_members);
 		ctx->discord_boosters = boosters_text;
-		ctx->discord_role_members = role_text;
+		for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+			bfree(ctx->discord_roles[i]);
+			ctx->discord_roles[i] = role_texts[i];
+		}
 		pthread_mutex_unlock(&ctx->mutex);
 
+		size_t total_role_members = 0;
+		for (int i = 0; i < DISCORD_MAX_ROLES; i++)
+			total_role_members += res->roles[i].num_members;
+
 		blog(LOG_INFO,
-		     "[obs-credits] Discord fetch complete: %zu boosters, %zu role members",
-		     res->num_boosters, res->num_role_members);
+		     "[obs-credits] Discord fetch complete: %zu boosters, "
+		     "%zu total role members",
+		     res->num_boosters, total_role_members);
 	}
 
 	discord_result_free(res);
 	bfree(a->bot_token);
 	bfree(a->guild_id);
-	bfree(a->role_id);
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++)
+		bfree(a->role_ids[i]);
 	bfree(a);
 
 	pthread_mutex_lock(&ctx->mutex);
@@ -387,14 +394,20 @@ static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
 	obs_data_t *settings = obs_source_get_settings(ctx->self);
 	const char *token = obs_data_get_string(settings, "discord_token");
 	const char *guild = obs_data_get_string(settings, "discord_guild_id");
-	const char *role = obs_data_get_string(settings, "discord_role_id");
 
 	struct discord_fetch_args *args =
 		bzalloc(sizeof(struct discord_fetch_args));
 	args->ctx = ctx;
 	args->bot_token = bstrdup(token);
 	args->guild_id = bstrdup(guild);
-	args->role_id = (role && role[0] != '\0') ? bstrdup(role) : NULL;
+
+	char key[64];
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+		snprintf(key, sizeof(key), "discord_role_%d_id", i);
+		const char *rid = obs_data_get_string(settings, key);
+		args->role_ids[i] =
+			(rid && rid[0] != '\0') ? bstrdup(rid) : NULL;
+	}
 
 	obs_data_release(settings);
 
@@ -411,20 +424,26 @@ static bool on_discord_toggled(void *data, obs_properties_t *props,
 	UNUSED_PARAMETER(data);
 	UNUSED_PARAMETER(prop);
 	bool enabled = obs_data_get_bool(settings, "discord_enabled");
+
 	obs_property_set_visible(obs_properties_get(props, "discord_token"),
 				 enabled);
 	obs_property_set_visible(
 		obs_properties_get(props, "discord_guild_id"), enabled);
 	obs_property_set_visible(
-		obs_properties_get(props, "discord_role_id"), enabled);
-	obs_property_set_visible(
-		obs_properties_get(props, "discord_role_label"), enabled);
+		obs_properties_get(props, "discord_booster_heading"), enabled);
+
+	char key[64];
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+		snprintf(key, sizeof(key), "discord_role_%d_id", i);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 enabled);
+		snprintf(key, sizeof(key), "discord_role_%d_heading", i);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 enabled);
+	}
+
 	obs_property_set_visible(obs_properties_get(props, "discord_fetch"),
 				 enabled);
-	obs_property_set_visible(
-		obs_properties_get(props, "discord_booster_heading"), enabled);
-	obs_property_set_visible(
-		obs_properties_get(props, "discord_role_heading"), enabled);
 	return true;
 }
 
@@ -602,7 +621,8 @@ static void credits_destroy(void *data)
 	pthread_mutex_destroy(&ctx->mutex);
 	bfree(ctx->default_font_face);
 	bfree(ctx->discord_boosters);
-	bfree(ctx->discord_role_members);
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++)
+		bfree(ctx->discord_roles[i]);
 	bfree(ctx);
 }
 
@@ -704,43 +724,59 @@ static void credits_update(void *data, obs_data_t *settings)
 	ctx->section_spacing = (float)section_sp;
 
 	/* Inject Discord sections if data is available */
-	if (obs_data_get_bool(settings, "discord_enabled") &&
-	    (ctx->discord_boosters || ctx->discord_role_members)) {
-		obs_data_array_t *arr =
-			obs_data_get_array(tmp, "sections");
-		if (!arr)
-			arr = obs_data_array_create();
-
-		if (ctx->discord_boosters) {
-			obs_data_t *sec = obs_data_create();
-			obs_data_set_string(
-				sec, "heading",
-				obs_data_get_string(
-					settings,
-					"discord_booster_heading"));
-			obs_data_set_string(sec, "names",
-					    ctx->discord_boosters);
-			obs_data_set_string(sec, "alignment", "center");
-			obs_data_array_push_back(arr, sec);
-			obs_data_release(sec);
+	if (obs_data_get_bool(settings, "discord_enabled")) {
+		bool has_discord_data = ctx->discord_boosters != NULL;
+		if (!has_discord_data) {
+			for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+				if (ctx->discord_roles[i]) {
+					has_discord_data = true;
+					break;
+				}
+			}
 		}
 
-		if (ctx->discord_role_members) {
-			obs_data_t *sec = obs_data_create();
-			obs_data_set_string(
-				sec, "heading",
-				obs_data_get_string(
-					settings,
-					"discord_role_heading"));
-			obs_data_set_string(sec, "names",
-					    ctx->discord_role_members);
-			obs_data_set_string(sec, "alignment", "center");
-			obs_data_array_push_back(arr, sec);
-			obs_data_release(sec);
-		}
+		if (has_discord_data) {
+			obs_data_array_t *discord_arr =
+				obs_data_get_array(tmp, "sections");
+			if (!discord_arr)
+				discord_arr = obs_data_array_create();
 
-		obs_data_set_array(tmp, "sections", arr);
-		obs_data_array_release(arr);
+			if (ctx->discord_boosters) {
+				const char *bhead = obs_data_get_string(
+					settings, "discord_booster_heading");
+				if (!bhead || bhead[0] == '\0')
+					bhead = "Server Boosters";
+				obs_data_t *sec = obs_data_create();
+				obs_data_set_string(sec, "heading", bhead);
+				obs_data_set_string(sec, "names",
+						    ctx->discord_boosters);
+				obs_data_set_string(sec, "alignment", "center");
+				obs_data_array_push_back(discord_arr, sec);
+				obs_data_release(sec);
+			}
+
+			char key[64];
+			for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+				if (!ctx->discord_roles[i])
+					continue;
+				snprintf(key, sizeof(key),
+					 "discord_role_%d_heading", i);
+				const char *rhead = obs_data_get_string(
+					settings, key);
+				if (!rhead || rhead[0] == '\0')
+					rhead = "Members";
+				obs_data_t *sec = obs_data_create();
+				obs_data_set_string(sec, "heading", rhead);
+				obs_data_set_string(sec, "names",
+						    ctx->discord_roles[i]);
+				obs_data_set_string(sec, "alignment", "center");
+				obs_data_array_push_back(discord_arr, sec);
+				obs_data_release(sec);
+			}
+
+			obs_data_set_array(tmp, "sections", discord_arr);
+			obs_data_array_release(discord_arr);
+		}
 	}
 
 	ctx->data = credits_build_from_settings(tmp);
@@ -795,7 +831,7 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "discord_enabled", false);
 	obs_data_set_default_string(settings, "discord_booster_heading",
 				    "Server Boosters");
-	obs_data_set_default_string(settings, "discord_role_heading",
+	obs_data_set_default_string(settings, "discord_role_0_heading",
 				    "Moderators");
 
 	obs_data_set_default_double(settings, "heading_spacing", 0.0);
@@ -1199,19 +1235,35 @@ static obs_properties_t *credits_get_properties(void *data)
 	obs_property_t *d_guild = obs_properties_add_text(
 		props, "discord_guild_id",
 		obs_module_text("DiscordGuildID"), OBS_TEXT_DEFAULT);
-	obs_property_t *d_role = obs_properties_add_text(
-		props, "discord_role_id",
-		obs_module_text("DiscordRoleID"), OBS_TEXT_DEFAULT);
-	obs_property_t *d_role_lbl = obs_properties_add_text(
-		props, "discord_role_label",
-		obs_module_text("DiscordRoleLabel"), OBS_TEXT_INFO);
 
 	obs_property_t *d_bhead = obs_properties_add_text(
 		props, "discord_booster_heading",
 		obs_module_text("DiscordBoosterHeading"), OBS_TEXT_DEFAULT);
-	obs_property_t *d_rhead = obs_properties_add_text(
-		props, "discord_role_heading",
-		obs_module_text("DiscordRoleHeading"), OBS_TEXT_DEFAULT);
+
+	/* 5 role slots: each has a Role ID field and a Section Heading field */
+	static const char *role_id_keys[DISCORD_MAX_ROLES] = {
+		"discord_role_0_id", "discord_role_1_id", "discord_role_2_id",
+		"discord_role_3_id", "discord_role_4_id"};
+	static const char *role_heading_keys[DISCORD_MAX_ROLES] = {
+		"discord_role_0_heading", "discord_role_1_heading",
+		"discord_role_2_heading", "discord_role_3_heading",
+		"discord_role_4_heading"};
+	static const char *role_id_labels[DISCORD_MAX_ROLES] = {
+		"DiscordRole1ID", "DiscordRole2ID", "DiscordRole3ID",
+		"DiscordRole4ID", "DiscordRole5ID"};
+	static const char *role_heading_labels[DISCORD_MAX_ROLES] = {
+		"DiscordRole1Heading", "DiscordRole2Heading",
+		"DiscordRole3Heading", "DiscordRole4Heading",
+		"DiscordRole5Heading"};
+
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+		obs_properties_add_text(props, role_id_keys[i],
+					obs_module_text(role_id_labels[i]),
+					OBS_TEXT_DEFAULT);
+		obs_properties_add_text(props, role_heading_keys[i],
+					obs_module_text(role_heading_labels[i]),
+					OBS_TEXT_DEFAULT);
+	}
 
 	obs_property_t *d_fetch = obs_properties_add_button2(
 		props, "discord_fetch", obs_module_text("DiscordFetch"),
@@ -1220,11 +1272,16 @@ static obs_properties_t *credits_get_properties(void *data)
 	bool d_on = obs_data_get_bool(settings, "discord_enabled");
 	obs_property_set_visible(d_token, d_on);
 	obs_property_set_visible(d_guild, d_on);
-	obs_property_set_visible(d_role, d_on);
-	obs_property_set_visible(d_role_lbl, d_on);
-	obs_property_set_visible(d_fetch, d_on);
 	obs_property_set_visible(d_bhead, d_on);
-	obs_property_set_visible(d_rhead, d_on);
+
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+		obs_property_set_visible(
+			obs_properties_get(props, role_id_keys[i]), d_on);
+		obs_property_set_visible(
+			obs_properties_get(props, role_heading_keys[i]), d_on);
+	}
+
+	obs_property_set_visible(d_fetch, d_on);
 
 	obs_data_release(settings);
 

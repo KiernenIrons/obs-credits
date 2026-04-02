@@ -142,11 +142,33 @@ static bool member_has_role(const cJSON *member, const char *role_id)
 	return false;
 }
 
+/* ---- Per-role dynamic array helpers ---- */
+
+struct role_buf {
+	struct discord_member *members;
+	size_t count;
+	size_t cap;
+};
+
+static void role_buf_push(struct role_buf *rb, const cJSON *member,
+			  bool is_booster)
+{
+	if (rb->count >= rb->cap) {
+		rb->cap = rb->cap ? rb->cap * 2 : 32;
+		rb->members = brealloc(rb->members,
+				       sizeof(struct discord_member) * rb->cap);
+	}
+	rb->members[rb->count].display_name = get_display_name(member);
+	rb->members[rb->count].avatar_url = get_avatar_url(member);
+	rb->members[rb->count].is_booster = is_booster;
+	rb->count++;
+}
+
 /* ---- Main fetch function ---- */
 
 struct discord_result *discord_fetch(const char *bot_token,
 				     const char *guild_id,
-				     const char *role_id)
+				     const char *role_ids[DISCORD_MAX_ROLES])
 {
 	struct discord_result *result =
 		bzalloc(sizeof(struct discord_result));
@@ -171,24 +193,24 @@ struct discord_result *discord_fetch(const char *bot_token,
 	headers = curl_slist_append(headers, auth_header);
 	headers = curl_slist_append(headers, "User-Agent: OBS-Credits/0.1");
 
-	/* Paginate guild members (up to 10 pages of 1000) */
-	size_t members_cap = 256;
+	/* Determine which role slots are active */
+	bool role_active[DISCORD_MAX_ROLES] = {false};
+	int active_role_count = 0;
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+		if (role_ids && role_ids[i] && role_ids[i][0] != '\0') {
+			role_active[i] = true;
+			active_role_count++;
+		}
+	}
+
+	/* Dynamic arrays for boosters and each role bucket */
+	struct role_buf boosters_buf = {NULL, 0, 0};
+	struct role_buf role_bufs[DISCORD_MAX_ROLES] = {{NULL, 0, 0}};
+
 	size_t members_count = 0;
-	struct discord_member *boosters = NULL;
-	size_t boosters_count = 0;
-	size_t boosters_cap = 64;
-	struct discord_member *role_members = NULL;
-	size_t role_count = 0;
-	size_t role_cap = 64;
-
-	boosters = bzalloc(sizeof(struct discord_member) * boosters_cap);
-	if (role_id && role_id[0] != '\0')
-		role_members =
-			bzalloc(sizeof(struct discord_member) * role_cap);
-
 	char after[64] = "0";
-	bool has_role_filter = role_id && role_id[0] != '\0';
 
+	/* Paginate guild members (up to 10 pages of 1000) */
 	for (int page = 0; page < 10; page++) {
 		char url[512];
 		snprintf(url, sizeof(url),
@@ -228,37 +250,16 @@ struct discord_result *discord_fetch(const char *bot_token,
 				cJSON_GetObjectItem(member, "premium_since");
 			if (cJSON_IsString(premium) &&
 			    premium->valuestring[0] != '\0') {
-				if (boosters_count >= boosters_cap) {
-					boosters_cap *= 2;
-					boosters = brealloc(
-						boosters,
-						sizeof(struct discord_member) *
-							boosters_cap);
-				}
-				boosters[boosters_count].display_name =
-					get_display_name(member);
-				boosters[boosters_count].avatar_url =
-					get_avatar_url(member);
-				boosters[boosters_count].is_booster = true;
-				boosters_count++;
+				role_buf_push(&boosters_buf, member, true);
 			}
 
-			/* Check role */
-			if (has_role_filter &&
-			    member_has_role(member, role_id)) {
-				if (role_count >= role_cap) {
-					role_cap *= 2;
-					role_members = brealloc(
-						role_members,
-						sizeof(struct discord_member) *
-							role_cap);
-				}
-				role_members[role_count].display_name =
-					get_display_name(member);
-				role_members[role_count].avatar_url =
-					get_avatar_url(member);
-				role_members[role_count].is_booster = false;
-				role_count++;
+			/* Check each active role slot */
+			for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+				if (!role_active[i])
+					continue;
+				if (member_has_role(member, role_ids[i]))
+					role_buf_push(&role_bufs[i], member,
+						      false);
 			}
 
 			members_count++;
@@ -274,16 +275,19 @@ struct discord_result *discord_fetch(const char *bot_token,
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 
-	result->boosters = boosters;
-	result->num_boosters = boosters_count;
-	result->role_members = role_members;
-	result->num_role_members = role_count;
+	result->boosters = boosters_buf.members;
+	result->num_boosters = boosters_buf.count;
+
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+		result->roles[i].members = role_bufs[i].members;
+		result->roles[i].num_members = role_bufs[i].count;
+	}
 
 	if (!result->error) {
 		blog(LOG_INFO,
 		     "[obs-credits] Discord fetch: %zu members scanned, "
-		     "%zu boosters, %zu role members",
-		     members_count, boosters_count, role_count);
+		     "%zu boosters, %d active role slots",
+		     members_count, boosters_buf.count, active_role_count);
 	}
 
 	return result;
@@ -300,11 +304,13 @@ void discord_result_free(struct discord_result *result)
 	}
 	bfree(result->boosters);
 
-	for (size_t i = 0; i < result->num_role_members; i++) {
-		bfree(result->role_members[i].display_name);
-		bfree(result->role_members[i].avatar_url);
+	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
+		for (size_t j = 0; j < result->roles[i].num_members; j++) {
+			bfree(result->roles[i].members[j].display_name);
+			bfree(result->roles[i].members[j].avatar_url);
+		}
+		bfree(result->roles[i].members);
 	}
-	bfree(result->role_members);
 
 	bfree(result->error);
 	bfree(result);
