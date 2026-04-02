@@ -22,6 +22,7 @@ struct credits_source {
 	char *default_font_face;
 	int default_font_size;
 	uint32_t heading_color;
+	uint32_t sub_color;
 	uint32_t text_color;
 
 	/* Outline settings */
@@ -394,6 +395,8 @@ static void credits_update(void *data, obs_data_t *settings)
 	 * We add alpha when passing to the renderer/text source. */
 	uint32_t hcolor =
 		(uint32_t)obs_data_get_int(settings, "heading_color");
+	uint32_t scolor =
+		(uint32_t)obs_data_get_int(settings, "sub_color");
 	uint32_t tcolor =
 		(uint32_t)obs_data_get_int(settings, "text_color");
 
@@ -443,6 +446,7 @@ static void credits_update(void *data, obs_data_t *settings)
 	ctx->default_font_size = size > 0 ? size : 32;
 
 	ctx->heading_color = hcolor;
+	ctx->sub_color = scolor;
 	ctx->text_color = tcolor;
 
 	ctx->outline_enabled = outline_on;
@@ -490,6 +494,8 @@ static void credits_get_defaults(obs_data_t *settings)
 	 * Gold (#FFD700), White (#FFFFFF) */
 	obs_data_set_default_int(settings, "heading_color",
 				 (long long)0x00FFD700);
+	obs_data_set_default_int(settings, "sub_color",
+				 (long long)0x00CCCCCC);
 	obs_data_set_default_int(settings, "text_color",
 				 (long long)0x00FFFFFF);
 
@@ -553,6 +559,7 @@ static void credits_video_tick(void *data, float seconds)
 		style.default_font = ctx->default_font_face;
 		style.default_font_size = ctx->default_font_size;
 		style.heading_color = ctx->heading_color;
+		style.sub_color = ctx->sub_color;
 		style.text_color = ctx->text_color;
 		style.outline_enabled = ctx->outline_enabled;
 		style.outline_size = ctx->outline_size;
@@ -840,6 +847,9 @@ static obs_properties_t *credits_get_properties(void *data)
 
 	obs_properties_add_color(props, "heading_color",
 				 obs_module_text("HeadingColor"));
+
+	obs_properties_add_color(props, "sub_color",
+				 obs_module_text("SubColor"));
 
 	obs_properties_add_color(props, "text_color",
 				 obs_module_text("TextColor"));

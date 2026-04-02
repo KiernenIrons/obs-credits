@@ -10,6 +10,7 @@ struct credits_style {
 	const char *default_font;
 	int default_font_size;
 	uint32_t heading_color;
+	uint32_t sub_color;
 	uint32_t text_color;
 	bool outline_enabled;
 	int outline_size;

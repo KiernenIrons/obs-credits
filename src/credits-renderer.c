@@ -289,9 +289,10 @@ struct credits_layout *credits_renderer_build(
 			const char *entry_text = NULL;
 			char combined[512];
 
-			/* Determine font face, size, and flags based on entry type */
+			/* Determine font face, size, flags, and color */
 			int e_size;
 			uint32_t e_flags;
+			uint32_t e_color;
 			const char *e_font;
 
 			switch (entry->type) {
@@ -308,6 +309,7 @@ struct credits_layout *credits_renderer_build(
 						 ? section->entry_size
 						 : default_font_size;
 				e_flags = section->entry_flags;
+				e_color = style->text_color;
 				break;
 			case CREDITS_ENTRY_NAME_ONLY:
 				entry_text = entry->name ? entry->name : "";
@@ -318,10 +320,10 @@ struct credits_layout *credits_renderer_build(
 						 ? section->entry_size
 						 : default_font_size;
 				e_flags = section->entry_flags;
+				e_color = style->text_color;
 				break;
 			case CREDITS_ENTRY_TEXT:
 				entry_text = entry->text ? entry->text : "";
-				/* Subheading is the first TEXT entry */
 				if (first_entry) {
 					e_font = section->sub_face
 							 ? section->sub_face
@@ -330,6 +332,7 @@ struct credits_layout *credits_renderer_build(
 							 ? section->sub_size
 							 : default_font_size;
 					e_flags = section->sub_flags;
+					e_color = style->sub_color;
 				} else {
 					e_font = section->entry_face
 							 ? section->entry_face
@@ -338,6 +341,7 @@ struct credits_layout *credits_renderer_build(
 							 ? section->entry_size
 							 : default_font_size;
 					e_flags = section->entry_flags;
+					e_color = style->text_color;
 				}
 				break;
 			case CREDITS_ENTRY_IMAGE:
@@ -372,8 +376,10 @@ struct credits_layout *credits_renderer_build(
 				first_entry = false;
 				continue;
 			default:
+				e_font = default_font;
 				e_size = default_font_size;
 				e_flags = 0;
+				e_color = style->text_color;
 				break;
 			}
 
@@ -385,7 +391,7 @@ struct credits_layout *credits_renderer_build(
 			le->text_source = make_text_source(
 				name_buf, entry_text, e_font,
 				e_size, e_flags,
-				style->text_color, style->outline_enabled,
+				e_color, style->outline_enabled,
 				style->outline_size, style->outline_color);
 			le->height = text_source_height(le->text_source,
 							e_size);
