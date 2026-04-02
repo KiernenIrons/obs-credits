@@ -332,23 +332,26 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 		if (align && align[0] != '\0')
 			section->alignment = bstrdup(align);
 
-		/* Read per-field font sizes */
-		section->heading_size =
-			(int)obs_data_get_int(sec, "heading_size");
-		section->sub_size =
-			(int)obs_data_get_int(sec, "sub_size");
-		section->entry_size =
-			(int)obs_data_get_int(sec, "entry_size");
-
-		/* Read per-field font flags */
-		section->heading_flags = build_flags_from_bools(
-			sec, "heading_bold", "heading_italic",
-			"heading_underline");
-		section->sub_flags = build_flags_from_bools(
-			sec, "sub_bold", "sub_italic", "sub_underline");
-		section->entry_flags = build_flags_from_bools(
-			sec, "entry_bold", "entry_italic",
-			"entry_underline");
+		/* Read per-field font pickers (size + flags from font obj) */
+		const char *font_keys[] = {"heading_font", "sub_font",
+					   "entry_font"};
+		int *sizes[] = {&section->heading_size, &section->sub_size,
+				&section->entry_size};
+		uint32_t *flags[] = {&section->heading_flags,
+				     &section->sub_flags,
+				     &section->entry_flags};
+		for (int f = 0; f < 3; f++) {
+			obs_data_t *fobj =
+				obs_data_get_obj(sec, font_keys[f]);
+			if (fobj) {
+				*sizes[f] =
+					(int)obs_data_get_int(fobj, "size");
+				*flags[f] =
+					(uint32_t)obs_data_get_int(fobj,
+								   "flags");
+				obs_data_release(fobj);
+			}
+		}
 
 		/* Count entries: subheading (if present) + name/role lines */
 		size_t name_lines = count_lines(names);
