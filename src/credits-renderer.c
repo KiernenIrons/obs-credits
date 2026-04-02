@@ -37,42 +37,41 @@ struct credits_layout {
  * make_text_source - Create a private text source for rendering.
  *
  * font_flags bitmask: Bold=1, Italic=2, Underline=4
- * color: ABGR format with alpha (e.g. 0xFF00D7FF for gold)
+ * color: ABGR with alpha already included
  * align: "left", "center", or "right"
+ * viewport_width: used for extents so text aligns within full width
  */
 static obs_source_t *make_text_source(const char *name, const char *text,
 				      const char *font_face, int font_size,
 				      uint32_t font_flags, uint32_t color,
-				      const char *align, bool outline_enabled,
-				      int outline_size, uint32_t outline_color)
+				      const char *align, uint32_t viewport_width,
+				      bool outline_enabled, int outline_size,
+				      uint32_t outline_color)
 {
 	if (!font_face)
 		font_face = "Arial";
 	if (!align)
 		align = "center";
 
-	/* Build font object */
 	obs_data_t *font_data = obs_data_create();
 	obs_data_set_string(font_data, "face", font_face);
 	obs_data_set_int(font_data, "size", font_size);
 
-	/* Build style string for text_gdiplus_v2 */
 	char style_str[64] = "";
 	int flags_int = 0;
-
-	if (font_flags & 1) {  /* Bold */
+	if (font_flags & 1) {
 		flags_int |= 1;
-		strncat(style_str, "Bold ", sizeof(style_str) - strlen(style_str) - 1);
+		strncat(style_str, "Bold ",
+			sizeof(style_str) - strlen(style_str) - 1);
 	}
-	if (font_flags & 2) {  /* Italic */
+	if (font_flags & 2) {
 		flags_int |= 2;
-		strncat(style_str, "Italic ", sizeof(style_str) - strlen(style_str) - 1);
+		strncat(style_str, "Italic ",
+			sizeof(style_str) - strlen(style_str) - 1);
 	}
-	if (font_flags & 4) {  /* Underline */
+	if (font_flags & 4)
 		flags_int |= 4;
-	}
 
-	/* Trim trailing space */
 	size_t slen = strlen(style_str);
 	if (slen > 0 && style_str[slen - 1] == ' ')
 		style_str[slen - 1] = '\0';
@@ -81,27 +80,33 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	obs_data_set_string(font_data, "style",
 			    style_str[0] ? style_str : "Regular");
 
-	/* Build source settings */
 	obs_data_t *settings = obs_data_create();
 	obs_data_set_string(settings, "text", text ? text : "");
 	obs_data_set_obj(settings, "font", font_data);
 
-	/* Ensure alpha is set on color (ABGR with 0xFF alpha) */
-	uint32_t color_abgr = color | 0xFF000000;
-
-	obs_data_set_int(settings, "color1", color_abgr);
-	obs_data_set_int(settings, "color2", color_abgr);
+	/* Color: ensure full alpha. OBS color pickers give 0x00BBGGRR,
+	 * text_gdiplus expects 0xAABBGGRR. Force alpha to 0xFF. */
+	uint32_t color_with_alpha = (color & 0x00FFFFFF) | 0xFF000000;
+	obs_data_set_int(settings, "color1", (long long)color_with_alpha);
+	obs_data_set_int(settings, "color2", (long long)color_with_alpha);
 	obs_data_set_bool(settings, "gradient", false);
 
-	/* Alignment: "left" -> "left", "center" -> "center", "right" -> "right" */
+	/* Use extents mode so alignment works within the viewport width.
+	 * Without extents, the text source is only as wide as the text
+	 * itself, so left/center/right alignment has no visible effect. */
+	obs_data_set_bool(settings, "extents", true);
+	obs_data_set_int(settings, "extents_cx", viewport_width);
+	obs_data_set_int(settings, "extents_cy", 0);
+	obs_data_set_bool(settings, "extents_wrap", true);
 	obs_data_set_string(settings, "align", align);
+	obs_data_set_string(settings, "valign", "top");
 
 	/* Outline */
 	obs_data_set_bool(settings, "outline", outline_enabled);
 	if (outline_enabled) {
 		obs_data_set_int(settings, "outline_size", outline_size);
-		obs_data_set_int(settings, "outline_color",
-				 outline_color | 0xFF000000);
+		uint32_t oc = (outline_color & 0x00FFFFFF) | 0xFF000000;
+		obs_data_set_int(settings, "outline_color", (long long)oc);
 		obs_data_set_int(settings, "outline_opacity", 100);
 	}
 
@@ -124,12 +129,6 @@ static float text_source_height(obs_source_t *source, int font_size)
 {
 	uint32_t h = obs_source_get_height(source);
 	return h > 0 ? (float)h : (float)font_size * 1.5f;
-}
-
-static float text_source_width(obs_source_t *source, int font_size)
-{
-	uint32_t w = obs_source_get_width(source);
-	return w > 0 ? (float)w : (float)font_size * 4.0f;
 }
 
 static float calc_entry_gap(int font_size)
@@ -155,19 +154,6 @@ static size_t count_total_elems(const struct credits_data *data)
 	return count;
 }
 
-/*
- * Compute x position based on alignment, viewport width, and element width.
- */
-static float compute_x(const char *align, float viewport_w, float elem_w)
-{
-	if (!align || strcmp(align, "center") == 0)
-		return (viewport_w - elem_w) / 2.0f;
-	if (strcmp(align, "right") == 0)
-		return viewport_w - elem_w;
-	/* "left" */
-	return 0.0f;
-}
-
 struct credits_layout *credits_renderer_build(
 	const struct credits_data *data, uint32_t viewport_width,
 	const struct credits_style *style)
@@ -184,7 +170,6 @@ struct credits_layout *credits_renderer_build(
 	float y_cursor = 0.0f;
 	size_t elem_idx = 0;
 	char name_buf[128];
-	float vw = (float)viewport_width;
 
 	const char *default_font = style->default_font ? style->default_font
 						       : "Arial";
@@ -195,15 +180,11 @@ struct credits_layout *credits_renderer_build(
 	for (size_t s = 0; s < data->num_sections; s++) {
 		const struct credits_section *section = &data->sections[s];
 
-		/* Determine section alignment */
 		const char *section_align = section->alignment
 						    ? section->alignment
 						    : "center";
-
-		/* Section font flags */
 		uint32_t section_flags = section->font_flags;
 
-		/* Entry gap / section gap scaled to font size */
 		float entry_gap = calc_entry_gap(default_font_size);
 		float section_gap = calc_section_gap(default_font_size);
 
@@ -225,25 +206,24 @@ struct credits_layout *credits_renderer_build(
 
 		struct layout_elem *he = &layout->elems[elem_idx++];
 		he->type = ELEM_TEXT;
+		/* With extents, text fills viewport width. Position at x=0. */
+		he->x = 0.0f;
 		he->text_source = make_text_source(
 			name_buf, heading_text, h_font, h_size, section_flags,
-			h_color, section_align, style->outline_enabled,
-			style->outline_size, style->outline_color);
+			h_color, section_align, viewport_width,
+			style->outline_enabled, style->outline_size,
+			style->outline_color);
 		he->height = text_source_height(he->text_source, h_size);
-
-		float h_w = text_source_width(he->text_source, h_size);
-		he->x = compute_x(section_align, vw, h_w);
 		he->y = y_cursor;
 
-		/* Shadow for heading */
 		if (style->shadow_enabled) {
-			char shadow_name[128];
-			snprintf(shadow_name, sizeof(shadow_name),
-				 "credits_heading_%zu_shadow", s);
+			char sname[128];
+			snprintf(sname, sizeof(sname),
+				 "credits_heading_%zu_sh", s);
 			he->shadow_source = make_text_source(
-				shadow_name, heading_text, h_font, h_size,
+				sname, heading_text, h_font, h_size,
 				section_flags, style->shadow_color,
-				section_align, false, 0, 0);
+				section_align, viewport_width, false, 0, 0);
 			he->shadow_off_x = style->shadow_offset_x;
 			he->shadow_off_y = style->shadow_offset_y;
 		}
@@ -255,78 +235,30 @@ struct credits_layout *credits_renderer_build(
 			const struct credits_entry *entry =
 				&section->entries[e];
 			struct layout_elem *le = &layout->elems[elem_idx++];
+			const char *entry_text = NULL;
+			char combined[512];
 
 			switch (entry->type) {
-			case CREDITS_ENTRY_NAME_ROLE: {
-				snprintf(name_buf, sizeof(name_buf),
-					 "credits_entry_%zu_%zu", s, e);
-				char combined[512];
+			case CREDITS_ENTRY_NAME_ROLE:
 				snprintf(combined, sizeof(combined),
 					 "%s  -  %s",
 					 entry->name ? entry->name : "",
 					 entry->role ? entry->role : "");
-				le->type = ELEM_TEXT;
-				le->text_source = make_text_source(
-					name_buf, combined, default_font,
-					default_font_size, section_flags,
-					style->text_color, section_align,
-					style->outline_enabled,
-					style->outline_size,
-					style->outline_color);
-				le->height = text_source_height(
-					le->text_source, default_font_size);
-				float ew = text_source_width(le->text_source,
-							     default_font_size);
-				le->x = compute_x(section_align, vw, ew);
+				entry_text = combined;
 				break;
-			}
-			case CREDITS_ENTRY_NAME_ONLY: {
-				snprintf(name_buf, sizeof(name_buf),
-					 "credits_name_%zu_%zu", s, e);
-				le->type = ELEM_TEXT;
-				le->text_source = make_text_source(
-					name_buf,
-					entry->name ? entry->name : "",
-					default_font, default_font_size,
-					section_flags, style->text_color,
-					section_align,
-					style->outline_enabled,
-					style->outline_size,
-					style->outline_color);
-				le->height = text_source_height(
-					le->text_source, default_font_size);
-				float ew = text_source_width(le->text_source,
-							     default_font_size);
-				le->x = compute_x(section_align, vw, ew);
+			case CREDITS_ENTRY_NAME_ONLY:
+				entry_text = entry->name ? entry->name : "";
 				break;
-			}
-			case CREDITS_ENTRY_TEXT: {
-				snprintf(name_buf, sizeof(name_buf),
-					 "credits_text_%zu_%zu", s, e);
-				le->type = ELEM_TEXT;
-				le->text_source = make_text_source(
-					name_buf,
-					entry->text ? entry->text : "",
-					default_font, default_font_size,
-					section_flags, style->text_color,
-					section_align,
-					style->outline_enabled,
-					style->outline_size,
-					style->outline_color);
-				le->height = text_source_height(
-					le->text_source, default_font_size);
-				float ew = text_source_width(le->text_source,
-							     default_font_size);
-				le->x = compute_x(section_align, vw, ew);
+			case CREDITS_ENTRY_TEXT:
+				entry_text = entry->text ? entry->text : "";
 				break;
-			}
-			case CREDITS_ENTRY_IMAGE: {
+			case CREDITS_ENTRY_IMAGE:
 				le->type = ELEM_IMAGE;
 				le->image = bzalloc(sizeof(gs_image_file3_t));
 				if (entry->image_path) {
-					gs_image_file3_init(le->image,
-							    entry->image_path,
-							    GS_IMAGE_ALPHA_STRAIGHT);
+					gs_image_file3_init(
+						le->image, entry->image_path,
+						GS_IMAGE_ALPHA_STRAIGHT);
 					gs_image_file3_init_texture(le->image);
 				}
 				le->image_width =
@@ -338,69 +270,43 @@ struct credits_layout *credits_renderer_build(
 						? (uint32_t)entry->image_height
 						: le->image->image2.image.cy;
 				le->height = (float)le->image_height;
-				le->x = compute_x(section_align, vw,
-						   (float)le->image_width);
-				break;
-			}
-			case CREDITS_ENTRY_SPACER: {
+				le->x = 0.0f;
+				le->y = y_cursor;
+				y_cursor += le->height + entry_gap;
+				continue;
+			case CREDITS_ENTRY_SPACER:
 				le->type = ELEM_SPACER;
 				le->height = (float)entry->spacer_height;
 				le->x = 0.0f;
-				break;
-			}
+				le->y = y_cursor;
+				y_cursor += le->height + entry_gap;
+				continue;
 			}
 
+			/* Text entry (NAME_ROLE, NAME_ONLY, TEXT) */
+			snprintf(name_buf, sizeof(name_buf),
+				 "credits_entry_%zu_%zu", s, e);
+			le->type = ELEM_TEXT;
+			le->x = 0.0f;
+			le->text_source = make_text_source(
+				name_buf, entry_text, default_font,
+				default_font_size, section_flags,
+				style->text_color, section_align,
+				viewport_width, style->outline_enabled,
+				style->outline_size, style->outline_color);
+			le->height = text_source_height(le->text_source,
+							default_font_size);
 			le->y = y_cursor;
 
-			/* Shadow for text entries */
-			if (le->type == ELEM_TEXT && style->shadow_enabled &&
-			    le->text_source) {
-				char shadow_name[128];
-				snprintf(shadow_name, sizeof(shadow_name),
-					 "credits_shadow_%zu_%zu", s, e);
-				const char *shadow_text = NULL;
-				switch (entry->type) {
-				case CREDITS_ENTRY_NAME_ROLE: {
-					char combined[512];
-					snprintf(combined, sizeof(combined),
-						 "%s  -  %s",
-						 entry->name ? entry->name
-							     : "",
-						 entry->role ? entry->role
-							     : "");
-					shadow_text = combined;
-					le->shadow_source = make_text_source(
-						shadow_name, shadow_text,
-						default_font,
-						default_font_size,
-						section_flags,
-						style->shadow_color,
-						section_align, false, 0, 0);
-					break;
-				}
-				case CREDITS_ENTRY_NAME_ONLY:
-					le->shadow_source = make_text_source(
-						shadow_name,
-						entry->name ? entry->name : "",
-						default_font,
-						default_font_size,
-						section_flags,
-						style->shadow_color,
-						section_align, false, 0, 0);
-					break;
-				case CREDITS_ENTRY_TEXT:
-					le->shadow_source = make_text_source(
-						shadow_name,
-						entry->text ? entry->text : "",
-						default_font,
-						default_font_size,
-						section_flags,
-						style->shadow_color,
-						section_align, false, 0, 0);
-					break;
-				default:
-					break;
-				}
+			if (style->shadow_enabled) {
+				char sname[128];
+				snprintf(sname, sizeof(sname),
+					 "credits_sh_%zu_%zu", s, e);
+				le->shadow_source = make_text_source(
+					sname, entry_text, default_font,
+					default_font_size, section_flags,
+					style->shadow_color, section_align,
+					viewport_width, false, 0, 0);
 				le->shadow_off_x = style->shadow_offset_x;
 				le->shadow_off_y = style->shadow_offset_y;
 			}
@@ -445,7 +351,6 @@ void credits_renderer_draw(const struct credits_layout *layout,
 	for (size_t i = 0; i < layout->num_elems; i++) {
 		const struct layout_elem *e = &layout->elems[i];
 
-		/* Viewport culling */
 		if (e->y + e->height < scroll_y)
 			continue;
 		if (e->y > scroll_y + viewport_h)
@@ -456,7 +361,6 @@ void credits_renderer_draw(const struct credits_layout *layout,
 			if (!e->text_source)
 				break;
 
-			/* Render shadow first if present */
 			if (e->shadow_source) {
 				gs_matrix_push();
 				gs_matrix_translate3f(
@@ -473,11 +377,10 @@ void credits_renderer_draw(const struct credits_layout *layout,
 			break;
 		}
 		case ELEM_IMAGE: {
-			if (!e->image ||
-			    !e->image->image2.image.texture)
+			if (!e->image || !e->image->image2.image.texture)
 				break;
-			gs_effect_t *effect = obs_get_base_effect(
-				OBS_EFFECT_DEFAULT);
+			gs_effect_t *effect =
+				obs_get_base_effect(OBS_EFFECT_DEFAULT);
 			gs_eparam_t *param = gs_effect_get_param_by_name(
 				effect, "image");
 			gs_effect_set_texture(
@@ -485,9 +388,9 @@ void credits_renderer_draw(const struct credits_layout *layout,
 			gs_matrix_push();
 			gs_matrix_translate3f(e->x, e->y, 0.0f);
 			while (gs_effect_loop(effect, "Draw"))
-				gs_draw_sprite(
-					e->image->image2.image.texture,
-					0, e->image_width, e->image_height);
+				gs_draw_sprite(e->image->image2.image.texture,
+					       0, e->image_width,
+					       e->image_height);
 			gs_matrix_pop();
 			break;
 		}
