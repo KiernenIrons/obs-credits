@@ -222,8 +222,8 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 		obs_data_release(fobj);
 	}
 
-	/* Ensure the group checkbox is checked (expanded) */
-	snprintf(key, sizeof(key), "section_%d_group", new_idx);
+	/* Ensure the new section starts expanded */
+	snprintf(key, sizeof(key), "section_%d_expand", new_idx);
 	obs_data_set_bool(settings, key, true);
 
 	/* Show the newly visible section group */
@@ -266,6 +266,36 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 
 	obs_source_update(ctx->self, settings);
 	obs_data_release(settings);
+	return true;
+}
+
+/* ---- Section expand/collapse callback ---- */
+
+static bool on_section_expand_toggled(void *data, obs_properties_t *props,
+				      obs_property_t *prop,
+				      obs_data_t *settings)
+{
+	UNUSED_PARAMETER(data);
+
+	/* Extract section index from property name: "section_N_expand" */
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "section_%d_expand", &idx) != 1)
+		return false;
+
+	bool expanded = obs_data_get_bool(settings, pname);
+
+	char key[64];
+	const char *fields[] = {"heading", "heading_font", "subheading",
+				"sub_font", "names", "roles", "entry_font",
+				"alignment"};
+	for (int f = 0; f < 8; f++) {
+		snprintf(key, sizeof(key), "section_%d_%s", idx, fields[f]);
+		obs_property_t *p = obs_properties_get(props, key);
+		if (p)
+			obs_property_set_visible(p, expanded);
+	}
+
 	return true;
 }
 
@@ -486,10 +516,10 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "entry_spacing", 0.0);
 	obs_data_set_default_double(settings, "section_spacing", 0.0);
 
-	/* Default all section groups to checked (expanded) */
+	/* Default all sections to expanded */
 	for (int i = 0; i < MAX_SECTIONS; i++) {
 		char key[64];
-		snprintf(key, sizeof(key), "section_%d_group", i);
+		snprintf(key, sizeof(key), "section_%d_expand", i);
 		obs_data_set_default_bool(settings, key, true);
 	}
 
@@ -672,13 +702,16 @@ static obs_properties_t *credits_get_properties(void *data)
 	 * Only the first `count` are visible. Add/remove toggles visibility
 	 * without rebuilding the panel (which would crash Qt). */
 	for (int i = 0; i < MAX_SECTIONS; i++) {
-		char group_name[64], heading_name[64], sub_name[64];
+		char group_name[64], expand_name[64];
+		char heading_name[64], sub_name[64];
 		char names_name[64], roles_name[64], align_name[64];
 		char remove_name[64], label[64];
 		char hfont_name[64], sfont_name[64], efont_name[64];
 
 		snprintf(group_name, sizeof(group_name), "section_%d_group",
 			 i);
+		snprintf(expand_name, sizeof(expand_name),
+			 "section_%d_expand", i);
 		snprintf(heading_name, sizeof(heading_name),
 			 "section_%d_heading", i);
 		snprintf(hfont_name, sizeof(hfont_name),
@@ -701,6 +734,13 @@ static obs_properties_t *credits_get_properties(void *data)
 			 obs_module_text("Section"), i + 1);
 
 		obs_properties_t *group = obs_properties_create();
+
+		/* Expand toggle - controls visibility of all fields below */
+		obs_property_t *exp = obs_properties_add_bool(
+			group, expand_name,
+			obs_module_text("ExpandSection"));
+		obs_property_set_modified_callback2(
+			exp, on_section_expand_toggled, ctx);
 
 		obs_properties_add_text(group, heading_name,
 					obs_module_text("Heading"),
@@ -740,6 +780,25 @@ static obs_properties_t *credits_get_properties(void *data)
 			obs_module_text("RemoveSection"),
 			on_remove_section, ctx);
 		obs_property_set_visible(rm, i < count && count > 1);
+
+		/* Set initial visibility based on expand state */
+		bool expanded = obs_data_get_bool(settings, expand_name);
+		obs_property_set_visible(
+			obs_properties_get(group, heading_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, hfont_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, sub_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, sfont_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, names_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, roles_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, efont_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, align_name), expanded);
 
 		obs_property_t *gp = obs_properties_add_group(
 			props, group_name, label, OBS_GROUP_NORMAL, group);
