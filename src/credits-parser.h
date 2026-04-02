@@ -29,6 +29,7 @@ struct credits_section {
 	int heading_font_size;
 	uint32_t heading_color;
 	char *alignment;
+	uint32_t font_flags;
 	struct credits_entry *entries;
 	size_t num_entries;
 };

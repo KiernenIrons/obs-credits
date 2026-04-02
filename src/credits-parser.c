@@ -114,6 +114,19 @@ static void parse_section(const cJSON *json, struct credits_section *section)
 		}
 	}
 
+	/* Parse font flags from JSON */
+	const cJSON *bold_item = cJSON_GetObjectItem(json, "bold");
+	const cJSON *italic_item = cJSON_GetObjectItem(json, "italic");
+	const cJSON *underline_item = cJSON_GetObjectItem(json, "underline");
+
+	section->font_flags = 0;
+	if (cJSON_IsBool(bold_item) && cJSON_IsTrue(bold_item))
+		section->font_flags |= 1;
+	if (cJSON_IsBool(italic_item) && cJSON_IsTrue(italic_item))
+		section->font_flags |= 2;
+	if (cJSON_IsBool(underline_item) && cJSON_IsTrue(underline_item))
+		section->font_flags |= 4;
+
 	const cJSON *entries_arr = cJSON_GetObjectItem(json, "entries");
 	if (cJSON_IsArray(entries_arr)) {
 		int count = cJSON_GetArraySize(entries_arr);
@@ -271,6 +284,23 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 
 		if (heading && heading[0] != '\0')
 			section->heading = bstrdup(heading);
+
+		/* Read alignment */
+		const char *align = obs_data_get_string(sec, "alignment");
+		if (align && align[0] != '\0')
+			section->alignment = bstrdup(align);
+
+		/* Read font flags (bold/italic/underline) */
+		bool bold = obs_data_get_bool(sec, "bold");
+		bool italic = obs_data_get_bool(sec, "italic");
+		bool underline = obs_data_get_bool(sec, "underline");
+		section->font_flags = 0;
+		if (bold)
+			section->font_flags |= 1;
+		if (italic)
+			section->font_flags |= 2;
+		if (underline)
+			section->font_flags |= 4;
 
 		/* Count entries: subheading (if present) + name/role lines */
 		size_t name_lines = count_lines(names);
