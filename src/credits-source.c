@@ -143,10 +143,25 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 	int count = (int)obs_data_get_int(settings, "section_count");
 	obs_data_set_int(settings, "section_count", count + 1);
 
-	/* Set default alignment for new section */
+	/* Clear all fields for the new section so it doesn't inherit
+	 * stale data from a previously removed section at this index */
 	char key[64];
+	snprintf(key, sizeof(key), "section_%d_heading", count);
+	obs_data_set_string(settings, key, "");
+	snprintf(key, sizeof(key), "section_%d_subheading", count);
+	obs_data_set_string(settings, key, "");
+	snprintf(key, sizeof(key), "section_%d_names", count);
+	obs_data_set_string(settings, key, "");
+	snprintf(key, sizeof(key), "section_%d_roles", count);
+	obs_data_set_string(settings, key, "");
 	snprintf(key, sizeof(key), "section_%d_alignment", count);
 	obs_data_set_string(settings, key, "center");
+	snprintf(key, sizeof(key), "section_%d_bold", count);
+	obs_data_set_bool(settings, key, false);
+	snprintf(key, sizeof(key), "section_%d_italic", count);
+	obs_data_set_bool(settings, key, false);
+	snprintf(key, sizeof(key), "section_%d_underline", count);
+	obs_data_set_bool(settings, key, false);
 
 	obs_data_release(settings);
 
@@ -171,7 +186,7 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 	}
 
 	int count = (int)obs_data_get_int(settings, "section_count");
-	if (idx >= count || count <= 0) {
+	if (idx >= count || count <= 1) {
 		obs_data_release(settings);
 		return false;
 	}
@@ -608,9 +623,13 @@ static obs_properties_t *credits_get_properties(void *data)
 		obs_properties_add_bool(group, underline_name,
 					obs_module_text("Underline"));
 
-		obs_properties_add_button2(group, remove_name,
-					   obs_module_text("RemoveSection"),
-					   on_remove_section, ctx);
+		/* Only show remove button if there are multiple sections */
+		if (count > 1) {
+			obs_properties_add_button2(
+				group, remove_name,
+				obs_module_text("RemoveSection"),
+				on_remove_section, ctx);
+		}
 
 		obs_properties_add_group(props, group_name, label,
 					 OBS_GROUP_NORMAL, group);
