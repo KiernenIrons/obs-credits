@@ -96,7 +96,6 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	 * itself, so left/center/right alignment has no visible effect. */
 	obs_data_set_bool(settings, "extents", true);
 	obs_data_set_int(settings, "extents_cx", viewport_width);
-	obs_data_set_int(settings, "extents_cy", 0);
 	obs_data_set_bool(settings, "extents_wrap", true);
 	obs_data_set_string(settings, "align", align);
 	obs_data_set_string(settings, "valign", "top");
@@ -111,7 +110,7 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	}
 
 #ifdef _WIN32
-	const char *text_source_id = "text_gdiplus_v2";
+	const char *text_source_id = "text_gdiplus_v3";
 #else
 	const char *text_source_id = "text_ft2_source";
 #endif
