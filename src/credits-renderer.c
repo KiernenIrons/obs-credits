@@ -44,7 +44,6 @@ struct credits_layout {
 static obs_source_t *make_text_source(const char *name, const char *text,
 				      const char *font_face, int font_size,
 				      uint32_t font_flags, uint32_t color,
-				      const char *align, uint32_t viewport_width,
 				      bool outline_enabled, int outline_size,
 				      uint32_t outline_color)
 {
@@ -89,13 +88,8 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 	obs_data_set_int(settings, "color2", (long long)color_with_alpha);
 	obs_data_set_bool(settings, "gradient", false);
 
-	/* Extents mode: text source gets a fixed width matching the viewport
-	 * so alignment (left/center/right) works within that width.
-	 * Wrap is off so long text won't word-wrap. Height is automatic. */
-	obs_data_set_bool(settings, "extents", true);
-	obs_data_set_int(settings, "extents_cx", viewport_width);
-	obs_data_set_bool(settings, "extents_wrap", false);
-	obs_data_set_string(settings, "align", align ? align : "center");
+	/* No extents - text renders at natural size, no clipping.
+	 * Alignment is handled by x positioning in the layout. */
 
 	/* Outline */
 	obs_data_set_bool(settings, "outline", outline_enabled);
@@ -127,10 +121,17 @@ static float text_source_height(obs_source_t *source, int font_size)
 	return h > 0 ? (float)h : (float)font_size * 1.5f;
 }
 
-static float text_source_width(obs_source_t *source, int font_size)
+static float text_source_width(obs_source_t *source, int font_size,
+			       const char *text)
 {
 	uint32_t w = obs_source_get_width(source);
-	return w > 0 ? (float)w : (float)font_size * 4.0f;
+	if (w > 0)
+		return (float)w;
+	/* Estimate: ~0.6 * font_size per character */
+	size_t len = text ? strlen(text) : 5;
+	if (len == 0)
+		len = 1;
+	return (float)font_size * 0.6f * (float)len;
 }
 
 static float compute_x(const char *align, float viewport_w, float elem_w)
@@ -227,13 +228,14 @@ struct credits_layout *credits_renderer_build(
 
 		struct layout_elem *he = &layout->elems[elem_idx++];
 		he->type = ELEM_TEXT;
-		he->x = 0.0f;
 		he->text_source = make_text_source(
 			name_buf, heading_text, h_font, h_size, h_flags,
-			h_color, section_align, viewport_width,
-			style->outline_enabled, style->outline_size,
+			h_color, style->outline_enabled, style->outline_size,
 			style->outline_color);
 		he->height = text_source_height(he->text_source, h_size);
+		he->x = compute_x(section_align, vw,
+				   text_source_width(he->text_source, h_size,
+						     heading_text));
 		he->y = y_cursor;
 
 		if (style->shadow_enabled) {
@@ -242,9 +244,7 @@ struct credits_layout *credits_renderer_build(
 				 "credits_heading_%zu_sh", s);
 			he->shadow_source = make_text_source(
 				sname, heading_text, h_font, h_size,
-				h_flags, style->shadow_color,
-				section_align, viewport_width,
-				false, 0, 0);
+				h_flags, style->shadow_color, false, 0, 0);
 			he->shadow_off_x = style->shadow_offset_x;
 			he->shadow_off_y = style->shadow_offset_y;
 		}
@@ -339,15 +339,17 @@ struct credits_layout *credits_renderer_build(
 			snprintf(name_buf, sizeof(name_buf),
 				 "credits_entry_%zu_%zu", s, e);
 			le->type = ELEM_TEXT;
-			le->x = 0.0f;
 			le->text_source = make_text_source(
 				name_buf, entry_text, default_font,
 				e_size, e_flags,
-				style->text_color, section_align,
-				viewport_width, style->outline_enabled,
+				style->text_color, style->outline_enabled,
 				style->outline_size, style->outline_color);
 			le->height = text_source_height(le->text_source,
 							e_size);
+			le->x = compute_x(section_align, vw,
+					   text_source_width(
+						   le->text_source,
+						   e_size, entry_text));
 			le->y = y_cursor;
 
 			if (style->shadow_enabled) {
@@ -357,8 +359,7 @@ struct credits_layout *credits_renderer_build(
 				le->shadow_source = make_text_source(
 					sname, entry_text, default_font,
 					e_size, e_flags,
-					style->shadow_color, section_align,
-					viewport_width, false, 0, 0);
+					style->shadow_color, false, 0, 0);
 				le->shadow_off_x = style->shadow_offset_x;
 				le->shadow_off_y = style->shadow_offset_y;
 			}
