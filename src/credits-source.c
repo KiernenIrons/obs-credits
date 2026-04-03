@@ -1200,6 +1200,7 @@ static bool on_yt_toggled(void *data, obs_properties_t *props,
 
 	const char *sub_props[] = {
 		"yt_channel_url",
+		"yt_start_collecting",
 		"yt_heading",
 		"yt_heading_font",
 		"yt_entry_font",
@@ -1212,7 +1213,7 @@ static bool on_yt_toggled(void *data, obs_properties_t *props,
 		"yt_entry_spacing",
 		"yt_section_spacing",
 	};
-	for (int i = 0; i < 12; i++) {
+	for (int i = 0; i < 13; i++) {
 		obs_property_t *p = obs_properties_get(props, sub_props[i]);
 		if (p)
 			obs_property_set_visible(p, enabled);
@@ -1240,6 +1241,33 @@ static bool on_yt_toggled(void *data, obs_properties_t *props,
 	}
 
 	return true;
+}
+
+static bool on_yt_start_collecting(obs_properties_t *props,
+				   obs_property_t *prop, void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(prop);
+
+	struct credits_source *ctx = data;
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
+
+	if (!obs_data_get_bool(settings, "yt_enabled")) {
+		obs_data_release(settings);
+		return false;
+	}
+
+	const char *url = obs_data_get_string(settings, "yt_channel_url");
+	if (url && url[0] != '\0') {
+		yt_chat_stop(&ctx->yt_chat);
+		yt_chat_clear(&ctx->yt_chat);
+		yt_chat_start(&ctx->yt_chat, url);
+		blog(LOG_INFO,
+		     "[obs-credits] YouTube chat: manual start for %s", url);
+	}
+
+	obs_data_release(settings);
+	return false;
 }
 
 static bool on_yt_outline_toggled(void *data, obs_properties_t *props,
@@ -2636,6 +2664,12 @@ static obs_properties_t *credits_get_properties(void *data)
 		props, "yt_channel_url", obs_module_text("YouTubeChannelURL"),
 		OBS_TEXT_DEFAULT);
 	obs_property_set_visible(yt_url, yt_on);
+
+	obs_property_t *yt_start = obs_properties_add_button2(
+		props, "yt_start_collecting",
+		obs_module_text("YouTubeStartCollecting"),
+		on_yt_start_collecting, ctx);
+	obs_property_set_visible(yt_start, yt_on);
 
 	obs_property_t *yt_heading_p = obs_properties_add_text(
 		props, "yt_heading", obs_module_text("YouTubeHeading"),
