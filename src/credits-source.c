@@ -330,8 +330,12 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 	int new_idx = count;
 	obs_data_set_int(settings, "section_count", count + 1);
 
-	/* Clear fields for new section */
+	/* Expand by default */
 	char key[64];
+	snprintf(key, sizeof(key), "section_%d_expand", new_idx);
+	obs_data_set_bool(settings, key, true);
+
+	/* Clear fields for new section */
 	const char *str_fields[] = {"heading", "subheading", "names", "roles"};
 	for (int f = 0; f < 4; f++) {
 		snprintf(key, sizeof(key), "section_%d_%s", new_idx,
@@ -554,6 +558,8 @@ static bool on_add_discord_section(obs_properties_t *props,
 	/* Set defaults for new Discord section */
 	char key[64];
 
+	snprintf(key, sizeof(key), "dsection_%d_expand", new_idx);
+	obs_data_set_bool(settings, key, true);
 	snprintf(key, sizeof(key), "dsection_%d_role_id", new_idx);
 	obs_data_set_string(settings, key, "");
 	snprintf(key, sizeof(key), "dsection_%d_heading", new_idx);
