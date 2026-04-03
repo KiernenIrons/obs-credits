@@ -34,6 +34,8 @@ struct credits_source {
 	struct credits_data *data;
 	struct credits_layout *layout;
 	gs_texrender_t *texrender;
+	gs_texture_t *snapshot;    /* frozen frame during rebuild */
+	int warmup_frames;         /* countdown while new sources warm up */
 	float scroll_offset;
 	float current_speed;
 	float total_height;
@@ -1453,6 +1455,8 @@ static void credits_destroy(void *data)
 
 	obs_enter_graphics();
 	gs_texrender_destroy(ctx->texrender);
+	if (ctx->snapshot)
+		gs_texture_destroy(ctx->snapshot);
 	obs_leave_graphics();
 
 	obs_hotkey_unregister(ctx->hotkey_start);
@@ -1957,10 +1961,28 @@ static void credits_video_tick(void *data, float seconds)
 		ctx->pending_free = NULL;
 	}
 
+	/* Count down warmup frames after a rebuild */
+	if (ctx->warmup_frames > 0)
+		ctx->warmup_frames--;
+
 	if (ctx->data && (ctx->needs_rebuild || !ctx->layout)) {
-		/* Build new layout, swap in, defer old layout free to next
-		 * tick. This ensures the old layout's sources stay alive
-		 * through the current render pass (no flicker). */
+		/* Take a snapshot of current rendered frame before rebuild.
+		 * This snapshot will be displayed while new text sources
+		 * warm up (they need 2-3 frames to render their text). */
+		if (ctx->texrender && ctx->layout) {
+			gs_texture_t *cur =
+				gs_texrender_get_texture(ctx->texrender);
+			if (cur) {
+				if (ctx->snapshot)
+					gs_texture_destroy(ctx->snapshot);
+				ctx->snapshot = gs_texture_create(
+					ctx->width, ctx->height, GS_RGBA,
+					1, NULL, GS_DYNAMIC);
+				if (ctx->snapshot)
+					gs_copy_texture(ctx->snapshot, cur);
+			}
+		}
+
 		struct credits_layout *new_layout =
 			credits_renderer_build(
 				ctx->data, ctx->width,
@@ -1971,6 +1993,7 @@ static void credits_video_tick(void *data, float seconds)
 			ctx->layout = new_layout;
 			ctx->total_height =
 				credits_renderer_total_height(new_layout);
+			ctx->warmup_frames = 3; /* show snapshot for 3 frames */
 		}
 		ctx->needs_rebuild = false;
 	}
@@ -2072,6 +2095,27 @@ static void credits_video_render(void *data, gs_effect_t *effect)
 		pthread_mutex_unlock(&ctx->mutex);
 		UNUSED_PARAMETER(effect);
 		return;
+	}
+
+	/* During warmup after a rebuild, show the frozen snapshot
+	 * instead of rendering the new (not-yet-ready) layout. */
+	if (ctx->warmup_frames > 0 && ctx->snapshot) {
+		gs_effect_t *def = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+		gs_eparam_t *param =
+			gs_effect_get_param_by_name(def, "image");
+		gs_effect_set_texture(param, ctx->snapshot);
+		while (gs_effect_loop(def, "Draw"))
+			gs_draw_sprite(ctx->snapshot, 0, ctx->width,
+				       ctx->height);
+		pthread_mutex_unlock(&ctx->mutex);
+		UNUSED_PARAMETER(effect);
+		return;
+	}
+
+	/* Free snapshot once warmup is over */
+	if (ctx->snapshot && ctx->warmup_frames <= 0) {
+		gs_texture_destroy(ctx->snapshot);
+		ctx->snapshot = NULL;
 	}
 
 	if (!ctx->texrender)
