@@ -10,30 +10,36 @@ struct discord_member {
 	bool is_booster;
 };
 
-#define DISCORD_MAX_ROLES 5
+#define MAX_DISCORD_SECTIONS 10
 
-/* Members belonging to one role */
-struct discord_role_result {
+/* Configuration for a single Discord section fetch */
+struct discord_fetch_config {
+	bool is_booster; /* true = fetch boosters, false = fetch by role_id */
+	char *role_id;   /* only used if is_booster=false */
+};
+
+/* Members belonging to one section */
+struct discord_section_result {
 	struct discord_member *members;
 	size_t num_members;
 };
 
 /* Result of a Discord fetch */
 struct discord_result {
-	struct discord_member *boosters;
-	size_t num_boosters;
-	struct discord_role_result roles[DISCORD_MAX_ROLES];
+	struct discord_section_result sections[MAX_DISCORD_SECTIONS];
+	int num_sections;
 	char *error; /* NULL on success, error message on failure */
 };
 
 /* Fetch Discord guild data. Runs HTTP requests (call from background thread).
- * bot_token : Discord bot token
- * guild_id  : Discord server/guild ID
- * role_ids  : Array of up to DISCORD_MAX_ROLES role ID strings (may be NULL
- *             or empty string for unused slots)
+ * bot_token   : Discord bot token
+ * guild_id    : Discord server/guild ID
+ * configs     : Array of fetch configs (one per Discord section)
+ * num_configs : Number of configs (up to MAX_DISCORD_SECTIONS)
  * Returns a discord_result (caller must free with discord_result_free). */
 struct discord_result *discord_fetch(const char *bot_token,
 				     const char *guild_id,
-				     const char *role_ids[DISCORD_MAX_ROLES]);
+				     const struct discord_fetch_config *configs,
+				     int num_configs);
 
 void discord_result_free(struct discord_result *result);

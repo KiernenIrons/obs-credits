@@ -46,8 +46,7 @@ struct credits_source {
 	obs_hotkey_id hotkey_stop;
 
 	/* Discord - fetched data stored as text for injection into sections */
-	char *discord_boosters;                    /* newline-separated names */
-	char *discord_roles[DISCORD_MAX_ROLES];    /* newline-separated names per role */
+	char *discord_sections[MAX_DISCORD_SECTIONS]; /* newline-separated names per section */
 	bool discord_fetching;
 
 	pthread_mutex_t mutex;
@@ -394,13 +393,227 @@ static bool on_remove_section(obs_properties_t *props, obs_property_t *prop,
 	return true;
 }
 
+/* ---- Discord section add/remove via visibility toggling ---- */
+
+static void set_discord_section_visibility(obs_properties_t *props, int idx,
+					   bool visible)
+{
+	char key[64];
+	snprintf(key, sizeof(key), "dsection_%d_group", idx);
+	obs_property_t *p = obs_properties_get(props, key);
+	if (p)
+		obs_property_set_visible(p, visible);
+}
+
+static void update_discord_remove_buttons(obs_properties_t *props, int count)
+{
+	for (int i = 0; i < MAX_DISCORD_SECTIONS; i++) {
+		char key[64];
+		snprintf(key, sizeof(key), "dsection_%d_remove", i);
+		obs_property_t *p = obs_properties_get(props, key);
+		if (p)
+			obs_property_set_visible(p, i < count);
+	}
+}
+
+/* Helper: shift all per-discord-section keys from src index to dst index */
+static void shift_dsection_keys(obs_data_t *settings, int dst, int src)
+{
+	char sk[64], dk[64];
+
+	/* String fields */
+	const char *str_fields[] = {"heading", "role_id", "alignment"};
+	for (int f = 0; f < 3; f++) {
+		snprintf(sk, sizeof(sk), "dsection_%d_%s", src, str_fields[f]);
+		snprintf(dk, sizeof(dk), "dsection_%d_%s", dst, str_fields[f]);
+		obs_data_set_string(settings, dk,
+				    obs_data_get_string(settings, sk));
+	}
+
+	/* Bool fields */
+	const char *bool_fields[] = {"is_booster", "expand",
+				     "outline_enabled", "shadow_enabled"};
+	for (int f = 0; f < 4; f++) {
+		snprintf(sk, sizeof(sk), "dsection_%d_%s", src, bool_fields[f]);
+		snprintf(dk, sizeof(dk), "dsection_%d_%s", dst, bool_fields[f]);
+		obs_data_set_bool(settings, dk,
+				  obs_data_get_bool(settings, sk));
+	}
+
+	/* Font picker objects */
+	const char *font_fields[] = {"heading_font", "entry_font"};
+	for (int f = 0; f < 2; f++) {
+		snprintf(sk, sizeof(sk), "dsection_%d_%s", src, font_fields[f]);
+		snprintf(dk, sizeof(dk), "dsection_%d_%s", dst, font_fields[f]);
+		obs_data_t *fobj = obs_data_get_obj(settings, sk);
+		if (fobj) {
+			obs_data_set_obj(settings, dk, fobj);
+			obs_data_release(fobj);
+		}
+	}
+
+	/* Int fields (colors + outline size) */
+	const char *int_fields[] = {"heading_color", "text_color",
+				    "outline_size", "outline_color",
+				    "shadow_color"};
+	for (int f = 0; f < 5; f++) {
+		snprintf(sk, sizeof(sk), "dsection_%d_%s", src, int_fields[f]);
+		snprintf(dk, sizeof(dk), "dsection_%d_%s", dst, int_fields[f]);
+		obs_data_set_int(settings, dk,
+				 obs_data_get_int(settings, sk));
+	}
+
+	/* Double fields */
+	const char *dbl_fields[] = {"shadow_offset_x", "shadow_offset_y",
+				    "heading_spacing", "entry_spacing",
+				    "section_spacing"};
+	for (int f = 0; f < 5; f++) {
+		snprintf(sk, sizeof(sk), "dsection_%d_%s", src, dbl_fields[f]);
+		snprintf(dk, sizeof(dk), "dsection_%d_%s", dst, dbl_fields[f]);
+		obs_data_set_double(settings, dk,
+				    obs_data_get_double(settings, sk));
+	}
+}
+
+static bool on_add_discord_section(obs_properties_t *props,
+				   obs_property_t *prop, void *data)
+{
+	UNUSED_PARAMETER(prop);
+
+	struct credits_source *ctx = data;
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
+
+	int count = (int)obs_data_get_int(settings, "discord_section_count");
+	if (count >= MAX_DISCORD_SECTIONS) {
+		obs_data_release(settings);
+		return false;
+	}
+
+	int new_idx = count;
+	obs_data_set_int(settings, "discord_section_count", count + 1);
+
+	/* Set defaults for new Discord section */
+	char key[64];
+
+	snprintf(key, sizeof(key), "dsection_%d_is_booster", new_idx);
+	obs_data_set_bool(settings, key, true);
+	snprintf(key, sizeof(key), "dsection_%d_role_id", new_idx);
+	obs_data_set_string(settings, key, "");
+	snprintf(key, sizeof(key), "dsection_%d_heading", new_idx);
+	obs_data_set_string(settings, key, "Server Boosters");
+	snprintf(key, sizeof(key), "dsection_%d_alignment", new_idx);
+	obs_data_set_string(settings, key, "center");
+
+	/* Default font objects */
+	const char *font_fields[] = {"heading_font", "entry_font"};
+	int def_sizes[] = {72, 36};
+	for (int f = 0; f < 2; f++) {
+		snprintf(key, sizeof(key), "dsection_%d_%s", new_idx,
+			 font_fields[f]);
+		obs_data_t *fobj = obs_data_create();
+		obs_data_set_string(fobj, "face", "Arial");
+		obs_data_set_int(fobj, "size", def_sizes[f]);
+		obs_data_set_int(fobj, "flags", 0);
+		obs_data_set_string(fobj, "style", "Regular");
+		obs_data_set_obj(settings, key, fobj);
+		obs_data_release(fobj);
+	}
+
+	/* Default colors */
+	snprintf(key, sizeof(key), "dsection_%d_heading_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00FFD700);
+	snprintf(key, sizeof(key), "dsection_%d_text_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00FFFFFF);
+
+	/* Default outline */
+	snprintf(key, sizeof(key), "dsection_%d_outline_enabled", new_idx);
+	obs_data_set_bool(settings, key, false);
+	snprintf(key, sizeof(key), "dsection_%d_outline_size", new_idx);
+	obs_data_set_int(settings, key, 2);
+	snprintf(key, sizeof(key), "dsection_%d_outline_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00000000);
+
+	/* Default shadow */
+	snprintf(key, sizeof(key), "dsection_%d_shadow_enabled", new_idx);
+	obs_data_set_bool(settings, key, false);
+	snprintf(key, sizeof(key), "dsection_%d_shadow_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00333333);
+	snprintf(key, sizeof(key), "dsection_%d_shadow_offset_x", new_idx);
+	obs_data_set_double(settings, key, 2.0);
+	snprintf(key, sizeof(key), "dsection_%d_shadow_offset_y", new_idx);
+	obs_data_set_double(settings, key, 2.0);
+
+	/* Default spacing */
+	snprintf(key, sizeof(key), "dsection_%d_heading_spacing", new_idx);
+	obs_data_set_double(settings, key, 0.0);
+	snprintf(key, sizeof(key), "dsection_%d_entry_spacing", new_idx);
+	obs_data_set_double(settings, key, 0.0);
+	snprintf(key, sizeof(key), "dsection_%d_section_spacing", new_idx);
+	obs_data_set_double(settings, key, 0.0);
+
+	/* Start expanded */
+	snprintf(key, sizeof(key), "dsection_%d_expand", new_idx);
+	obs_data_set_bool(settings, key, true);
+
+	/* Show the newly visible discord section group */
+	set_discord_section_visibility(props, new_idx, true);
+	update_discord_remove_buttons(props, count + 1);
+
+	obs_source_update(ctx->self, settings);
+	obs_data_release(settings);
+	return true;
+}
+
+static bool on_remove_discord_section(obs_properties_t *props,
+				      obs_property_t *prop, void *data)
+{
+	struct credits_source *ctx = data;
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
+
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "dsection_%d_remove", &idx) != 1) {
+		obs_data_release(settings);
+		return false;
+	}
+
+	int count = (int)obs_data_get_int(settings, "discord_section_count");
+	if (idx >= count || count <= 0) {
+		obs_data_release(settings);
+		return false;
+	}
+
+	/* Shift data from sections after idx down by one */
+	for (int i = idx; i < count - 1; i++)
+		shift_dsection_keys(settings, i, i + 1);
+
+	/* Also shift the fetched discord data */
+	pthread_mutex_lock(&ctx->mutex);
+	bfree(ctx->discord_sections[idx]);
+	for (int i = idx; i < count - 1; i++)
+		ctx->discord_sections[i] = ctx->discord_sections[i + 1];
+	ctx->discord_sections[count - 1] = NULL;
+	pthread_mutex_unlock(&ctx->mutex);
+
+	obs_data_set_int(settings, "discord_section_count", count - 1);
+
+	/* Hide the last discord section group (now unused) */
+	set_discord_section_visibility(props, count - 1, false);
+	update_discord_remove_buttons(props, count - 1);
+
+	obs_source_update(ctx->self, settings);
+	obs_data_release(settings);
+	return true;
+}
+
 /* ---- Discord fetch (background thread) ---- */
 
 struct discord_fetch_args {
 	struct credits_source *ctx;
 	char *bot_token;
 	char *guild_id;
-	char *role_ids[DISCORD_MAX_ROLES];
+	struct discord_fetch_config configs[MAX_DISCORD_SECTIONS];
+	int num_configs;
 };
 
 /* Helper: build a newline-separated string from a discord_member array.
@@ -432,52 +645,45 @@ static void *discord_fetch_thread(void *arg)
 
 	blog(LOG_INFO, "[obs-credits] Discord fetch started...");
 
-	/* Pass the const char* array to discord_fetch */
-	const char *role_id_ptrs[DISCORD_MAX_ROLES];
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++)
-		role_id_ptrs[i] = a->role_ids[i]; /* NULL if not set */
-
 	struct discord_result *res =
-		discord_fetch(a->bot_token, a->guild_id, role_id_ptrs);
+		discord_fetch(a->bot_token, a->guild_id,
+			      a->configs, a->num_configs);
 
 	if (res->error) {
 		blog(LOG_WARNING, "[obs-credits] Discord fetch error: %s",
 		     res->error);
 	} else {
-		char *boosters_text =
-			members_to_text(res->boosters, res->num_boosters);
+		char *section_texts[MAX_DISCORD_SECTIONS];
+		memset(section_texts, 0, sizeof(section_texts));
 
-		char *role_texts[DISCORD_MAX_ROLES];
-		for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-			role_texts[i] =
-				members_to_text(res->roles[i].members,
-						res->roles[i].num_members);
+		for (int i = 0; i < res->num_sections; i++) {
+			section_texts[i] =
+				members_to_text(res->sections[i].members,
+						res->sections[i].num_members);
 		}
 
 		pthread_mutex_lock(&ctx->mutex);
-		bfree(ctx->discord_boosters);
-		ctx->discord_boosters = boosters_text;
-		for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-			bfree(ctx->discord_roles[i]);
-			ctx->discord_roles[i] = role_texts[i];
+		for (int i = 0; i < MAX_DISCORD_SECTIONS; i++) {
+			bfree(ctx->discord_sections[i]);
+			ctx->discord_sections[i] = section_texts[i];
 		}
 		pthread_mutex_unlock(&ctx->mutex);
 
-		size_t total_role_members = 0;
-		for (int i = 0; i < DISCORD_MAX_ROLES; i++)
-			total_role_members += res->roles[i].num_members;
+		size_t total_members = 0;
+		for (int i = 0; i < res->num_sections; i++)
+			total_members += res->sections[i].num_members;
 
 		blog(LOG_INFO,
-		     "[obs-credits] Discord fetch complete: %zu boosters, "
-		     "%zu total role members",
-		     res->num_boosters, total_role_members);
+		     "[obs-credits] Discord fetch complete: %d sections, "
+		     "%zu total matched members",
+		     res->num_sections, total_members);
 	}
 
 	discord_result_free(res);
 	bfree(a->bot_token);
 	bfree(a->guild_id);
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++)
-		bfree(a->role_ids[i]);
+	for (int i = 0; i < a->num_configs; i++)
+		bfree(a->configs[i].role_id);
 	bfree(a);
 
 	pthread_mutex_lock(&ctx->mutex);
@@ -507,18 +713,33 @@ static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
 	const char *token = obs_data_get_string(settings, "discord_token");
 	const char *guild = obs_data_get_string(settings, "discord_guild_id");
 
+	int dscount =
+		(int)obs_data_get_int(settings, "discord_section_count");
+	if (dscount > MAX_DISCORD_SECTIONS)
+		dscount = MAX_DISCORD_SECTIONS;
+
 	struct discord_fetch_args *args =
 		bzalloc(sizeof(struct discord_fetch_args));
 	args->ctx = ctx;
 	args->bot_token = bstrdup(token);
 	args->guild_id = bstrdup(guild);
+	args->num_configs = dscount;
 
 	char key[64];
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-		snprintf(key, sizeof(key), "discord_role_%d_id", i);
-		const char *rid = obs_data_get_string(settings, key);
-		args->role_ids[i] =
-			(rid && rid[0] != '\0') ? bstrdup(rid) : NULL;
+	for (int i = 0; i < dscount; i++) {
+		snprintf(key, sizeof(key), "dsection_%d_is_booster", i);
+		args->configs[i].is_booster =
+			obs_data_get_bool(settings, key);
+
+		if (!args->configs[i].is_booster) {
+			snprintf(key, sizeof(key), "dsection_%d_role_id", i);
+			const char *rid =
+				obs_data_get_string(settings, key);
+			args->configs[i].role_id =
+				(rid && rid[0] != '\0') ? bstrdup(rid) : NULL;
+		} else {
+			args->configs[i].role_id = NULL;
+		}
 	}
 
 	obs_data_release(settings);
@@ -541,19 +762,20 @@ static bool on_discord_toggled(void *data, obs_properties_t *props,
 				 enabled);
 	obs_property_set_visible(
 		obs_properties_get(props, "discord_guild_id"), enabled);
-	obs_property_set_visible(
-		obs_properties_get(props, "discord_booster_heading"), enabled);
 
-	char key[64];
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-		snprintf(key, sizeof(key), "discord_role_%d_id", i);
-		obs_property_set_visible(obs_properties_get(props, key),
-					 enabled);
-		snprintf(key, sizeof(key), "discord_role_%d_heading", i);
-		obs_property_set_visible(obs_properties_get(props, key),
-					 enabled);
+	/* Show/hide all discord section groups */
+	int dscount =
+		(int)obs_data_get_int(settings, "discord_section_count");
+	for (int i = 0; i < MAX_DISCORD_SECTIONS; i++) {
+		char key[64];
+		snprintf(key, sizeof(key), "dsection_%d_group", i);
+		obs_property_t *p = obs_properties_get(props, key);
+		if (p)
+			obs_property_set_visible(p, enabled && i < dscount);
 	}
 
+	obs_property_set_visible(
+		obs_properties_get(props, "add_discord_section"), enabled);
 	obs_property_set_visible(obs_properties_get(props, "discord_fetch"),
 				 enabled);
 	return true;
@@ -665,6 +887,144 @@ static bool on_section_shadow_toggled(void *data, obs_properties_t *props,
 	snprintf(key, sizeof(key), "section_%d_shadow_offset_x", idx);
 	obs_property_set_visible(obs_properties_get(props, key), enabled);
 	snprintf(key, sizeof(key), "section_%d_shadow_offset_y", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+
+	return true;
+}
+
+/* ---- Discord section expand/collapse callback ---- */
+
+static bool on_discord_section_expand_toggled(void *data,
+					      obs_properties_t *props,
+					      obs_property_t *prop,
+					      obs_data_t *settings)
+{
+	UNUSED_PARAMETER(data);
+
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "dsection_%d_expand", &idx) != 1)
+		return false;
+
+	bool expanded = obs_data_get_bool(settings, pname);
+
+	char key[64];
+	const char *fields[] = {"is_booster", "role_id", "heading",
+				"heading_font", "entry_font", "alignment",
+				"heading_color", "text_color",
+				"outline_enabled", "outline_size",
+				"outline_color",
+				"shadow_enabled", "shadow_color",
+				"shadow_offset_x", "shadow_offset_y",
+				"heading_spacing", "entry_spacing",
+				"section_spacing"};
+	for (int f = 0; f < 18; f++) {
+		snprintf(key, sizeof(key), "dsection_%d_%s", idx, fields[f]);
+		obs_property_t *p = obs_properties_get(props, key);
+		if (p)
+			obs_property_set_visible(p, expanded);
+	}
+
+	/* Hide role_id if is_booster is checked */
+	if (expanded) {
+		snprintf(key, sizeof(key), "dsection_%d_is_booster", idx);
+		bool is_booster = obs_data_get_bool(settings, key);
+		snprintf(key, sizeof(key), "dsection_%d_role_id", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 !is_booster);
+
+		/* Outline sub-properties */
+		snprintf(key, sizeof(key), "dsection_%d_outline_enabled", idx);
+		bool ol_on = obs_data_get_bool(settings, key);
+		snprintf(key, sizeof(key), "dsection_%d_outline_size", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 ol_on);
+		snprintf(key, sizeof(key), "dsection_%d_outline_color", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 ol_on);
+
+		/* Shadow sub-properties */
+		snprintf(key, sizeof(key), "dsection_%d_shadow_enabled", idx);
+		bool sh_on = obs_data_get_bool(settings, key);
+		snprintf(key, sizeof(key), "dsection_%d_shadow_color", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 sh_on);
+		snprintf(key, sizeof(key), "dsection_%d_shadow_offset_x", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 sh_on);
+		snprintf(key, sizeof(key), "dsection_%d_shadow_offset_y", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 sh_on);
+	}
+
+	return true;
+}
+
+/* ---- Discord section booster toggle callback ---- */
+
+static bool on_dsection_booster_toggled(void *data, obs_properties_t *props,
+					obs_property_t *prop,
+					obs_data_t *settings)
+{
+	UNUSED_PARAMETER(data);
+
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "dsection_%d_is_booster", &idx) != 1)
+		return false;
+
+	bool is_booster = obs_data_get_bool(settings, pname);
+	char key[64];
+
+	snprintf(key, sizeof(key), "dsection_%d_role_id", idx);
+	obs_property_set_visible(obs_properties_get(props, key), !is_booster);
+
+	return true;
+}
+
+/* ---- Discord section outline/shadow visibility callbacks ---- */
+
+static bool on_dsection_outline_toggled(void *data, obs_properties_t *props,
+					obs_property_t *prop,
+					obs_data_t *settings)
+{
+	UNUSED_PARAMETER(data);
+
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "dsection_%d_outline_enabled", &idx) != 1)
+		return false;
+
+	bool enabled = obs_data_get_bool(settings, pname);
+	char key[64];
+
+	snprintf(key, sizeof(key), "dsection_%d_outline_size", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+	snprintf(key, sizeof(key), "dsection_%d_outline_color", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+
+	return true;
+}
+
+static bool on_dsection_shadow_toggled(void *data, obs_properties_t *props,
+				       obs_property_t *prop,
+				       obs_data_t *settings)
+{
+	UNUSED_PARAMETER(data);
+
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "dsection_%d_shadow_enabled", &idx) != 1)
+		return false;
+
+	bool enabled = obs_data_get_bool(settings, pname);
+	char key[64];
+
+	snprintf(key, sizeof(key), "dsection_%d_shadow_color", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+	snprintf(key, sizeof(key), "dsection_%d_shadow_offset_x", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+	snprintf(key, sizeof(key), "dsection_%d_shadow_offset_y", idx);
 	obs_property_set_visible(obs_properties_get(props, key), enabled);
 
 	return true;
@@ -783,9 +1143,8 @@ static void credits_destroy(void *data)
 
 	pthread_mutex_destroy(&ctx->mutex);
 	bfree(ctx->default_font_face);
-	bfree(ctx->discord_boosters);
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++)
-		bfree(ctx->discord_roles[i]);
+	for (int i = 0; i < MAX_DISCORD_SECTIONS; i++)
+		bfree(ctx->discord_sections[i]);
 	bfree(ctx);
 }
 
@@ -843,13 +1202,16 @@ static void credits_update(void *data, obs_data_t *settings)
 
 	/* Inject Discord sections if data is available */
 	if (obs_data_get_bool(settings, "discord_enabled")) {
-		bool has_discord_data = ctx->discord_boosters != NULL;
-		if (!has_discord_data) {
-			for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-				if (ctx->discord_roles[i]) {
-					has_discord_data = true;
-					break;
-				}
+		int dscount = (int)obs_data_get_int(settings,
+						    "discord_section_count");
+		if (dscount > MAX_DISCORD_SECTIONS)
+			dscount = MAX_DISCORD_SECTIONS;
+
+		bool has_discord_data = false;
+		for (int i = 0; i < dscount; i++) {
+			if (ctx->discord_sections[i]) {
+				has_discord_data = true;
+				break;
 			}
 		}
 
@@ -859,53 +1221,127 @@ static void credits_update(void *data, obs_data_t *settings)
 			if (!discord_arr)
 				discord_arr = obs_data_array_create();
 
-			if (ctx->discord_boosters) {
-				const char *bhead = obs_data_get_string(
-					settings, "discord_booster_heading");
-				if (!bhead || bhead[0] == '\0')
-					bhead = "Server Boosters";
-				obs_data_t *sec = obs_data_create();
-				obs_data_set_string(sec, "heading", bhead);
-				obs_data_set_string(sec, "names",
-						    ctx->discord_boosters);
-				obs_data_set_string(sec, "alignment", "center");
-				/* Discord section default styling */
-				obs_data_set_int(sec, "heading_color",
-						 (long long)0x00FFD700);
-				obs_data_set_int(sec, "sub_color",
-						 (long long)0x00CCCCCC);
-				obs_data_set_int(sec, "text_color",
-						 (long long)0x0000FF00);
-				obs_data_set_bool(sec, "outline_enabled", false);
-				obs_data_set_bool(sec, "shadow_enabled", false);
-				obs_data_array_push_back(discord_arr, sec);
-				obs_data_release(sec);
-			}
-
 			char key[64];
-			for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-				if (!ctx->discord_roles[i])
+			for (int i = 0; i < dscount; i++) {
+				if (!ctx->discord_sections[i])
 					continue;
-				snprintf(key, sizeof(key),
-					 "discord_role_%d_heading", i);
-				const char *rhead = obs_data_get_string(
-					settings, key);
-				if (!rhead || rhead[0] == '\0')
-					rhead = "Members";
+
 				obs_data_t *sec = obs_data_create();
-				obs_data_set_string(sec, "heading", rhead);
+
+				/* Heading */
+				snprintf(key, sizeof(key),
+					 "dsection_%d_heading", i);
+				const char *heading =
+					obs_data_get_string(settings, key);
+				if (!heading || heading[0] == '\0')
+					heading = "Discord Members";
+				obs_data_set_string(sec, "heading", heading);
+
+				/* Names from fetched data */
 				obs_data_set_string(sec, "names",
-						    ctx->discord_roles[i]);
-				obs_data_set_string(sec, "alignment", "center");
-				/* Discord section default styling */
+						    ctx->discord_sections[i]);
+
+				/* Alignment */
+				snprintf(key, sizeof(key),
+					 "dsection_%d_alignment", i);
+				obs_data_set_string(
+					sec, "alignment",
+					obs_data_get_string(settings, key));
+
+				/* Font pickers */
+				const char *ds_font_fields[] = {
+					"heading_font", "entry_font"};
+				for (int f = 0; f < 2; f++) {
+					snprintf(key, sizeof(key),
+						 "dsection_%d_%s", i,
+						 ds_font_fields[f]);
+					obs_data_t *fobj =
+						obs_data_get_obj(settings, key);
+					if (fobj) {
+						obs_data_set_obj(
+							sec,
+							ds_font_fields[f],
+							fobj);
+						obs_data_release(fobj);
+					}
+				}
+
+				/* Colors */
+				snprintf(key, sizeof(key),
+					 "dsection_%d_heading_color", i);
 				obs_data_set_int(sec, "heading_color",
-						 (long long)0x00FFD700);
-				obs_data_set_int(sec, "sub_color",
-						 (long long)0x00CCCCCC);
+						 obs_data_get_int(settings,
+								  key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_text_color", i);
 				obs_data_set_int(sec, "text_color",
-						 (long long)0x0000FF00);
-				obs_data_set_bool(sec, "outline_enabled", false);
-				obs_data_set_bool(sec, "shadow_enabled", false);
+						 obs_data_get_int(settings,
+								  key));
+
+				/* Outline */
+				snprintf(key, sizeof(key),
+					 "dsection_%d_outline_enabled", i);
+				obs_data_set_bool(
+					sec, "outline_enabled",
+					obs_data_get_bool(settings, key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_outline_size", i);
+				obs_data_set_int(sec, "outline_size",
+						 obs_data_get_int(settings,
+								  key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_outline_color", i);
+				obs_data_set_int(sec, "outline_color",
+						 obs_data_get_int(settings,
+								  key));
+
+				/* Shadow */
+				snprintf(key, sizeof(key),
+					 "dsection_%d_shadow_enabled", i);
+				obs_data_set_bool(
+					sec, "shadow_enabled",
+					obs_data_get_bool(settings, key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_shadow_color", i);
+				obs_data_set_int(sec, "shadow_color",
+						 obs_data_get_int(settings,
+								  key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_shadow_offset_x", i);
+				obs_data_set_double(
+					sec, "shadow_offset_x",
+					obs_data_get_double(settings, key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_shadow_offset_y", i);
+				obs_data_set_double(
+					sec, "shadow_offset_y",
+					obs_data_get_double(settings, key));
+
+				/* Spacing */
+				snprintf(key, sizeof(key),
+					 "dsection_%d_heading_spacing", i);
+				obs_data_set_double(
+					sec, "heading_spacing",
+					obs_data_get_double(settings, key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_entry_spacing", i);
+				obs_data_set_double(
+					sec, "entry_spacing",
+					obs_data_get_double(settings, key));
+
+				snprintf(key, sizeof(key),
+					 "dsection_%d_section_spacing", i);
+				obs_data_set_double(
+					sec, "section_spacing",
+					obs_data_get_double(settings, key));
+
 				obs_data_array_push_back(discord_arr, sec);
 				obs_data_release(sec);
 			}
@@ -969,15 +1405,19 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_double(settings, "loop_delay", 0.0);
 
 	obs_data_set_default_bool(settings, "discord_enabled", false);
-	obs_data_set_default_string(settings, "discord_booster_heading",
-				    "Server Boosters");
-	obs_data_set_default_string(settings, "discord_role_0_heading",
-				    "Moderators");
+	obs_data_set_default_int(settings, "discord_section_count", 0);
 
 	/* Default all sections to expanded */
 	for (int i = 0; i < MAX_SECTIONS; i++) {
 		char key[64];
 		snprintf(key, sizeof(key), "section_%d_expand", i);
+		obs_data_set_default_bool(settings, key, true);
+	}
+
+	/* Default all discord sections to expanded */
+	for (int i = 0; i < MAX_DISCORD_SECTIONS; i++) {
+		char key[64];
+		snprintf(key, sizeof(key), "dsection_%d_expand", i);
 		obs_data_set_default_bool(settings, key, true);
 	}
 
@@ -1413,58 +1853,243 @@ static obs_properties_t *credits_get_properties(void *data)
 	obs_property_set_modified_callback2(discord_cb, on_discord_toggled,
 					    ctx);
 
+	bool d_on = obs_data_get_bool(settings, "discord_enabled");
+
 	obs_property_t *d_token = obs_properties_add_text(
 		props, "discord_token", obs_module_text("DiscordToken"),
 		OBS_TEXT_PASSWORD);
+	obs_property_set_visible(d_token, d_on);
+
 	obs_property_t *d_guild = obs_properties_add_text(
 		props, "discord_guild_id",
 		obs_module_text("DiscordGuildID"), OBS_TEXT_DEFAULT);
+	obs_property_set_visible(d_guild, d_on);
 
-	obs_property_t *d_bhead = obs_properties_add_text(
-		props, "discord_booster_heading",
-		obs_module_text("DiscordBoosterHeading"), OBS_TEXT_DEFAULT);
+	/* Discord sections - pre-create all up to MAX_DISCORD_SECTIONS */
+	int dscount =
+		(int)obs_data_get_int(settings, "discord_section_count");
 
-	/* 5 role slots: each has a Role ID field and a Section Heading field */
-	static const char *role_id_keys[DISCORD_MAX_ROLES] = {
-		"discord_role_0_id", "discord_role_1_id", "discord_role_2_id",
-		"discord_role_3_id", "discord_role_4_id"};
-	static const char *role_heading_keys[DISCORD_MAX_ROLES] = {
-		"discord_role_0_heading", "discord_role_1_heading",
-		"discord_role_2_heading", "discord_role_3_heading",
-		"discord_role_4_heading"};
-	static const char *role_id_labels[DISCORD_MAX_ROLES] = {
-		"DiscordRole1ID", "DiscordRole2ID", "DiscordRole3ID",
-		"DiscordRole4ID", "DiscordRole5ID"};
-	static const char *role_heading_labels[DISCORD_MAX_ROLES] = {
-		"DiscordRole1Heading", "DiscordRole2Heading",
-		"DiscordRole3Heading", "DiscordRole4Heading",
-		"DiscordRole5Heading"};
+	for (int i = 0; i < MAX_DISCORD_SECTIONS; i++) {
+		char group_name[64], expand_name[64];
+		char booster_name[64], role_id_name[64];
+		char heading_name[64], align_name[64];
+		char hfont_name[64], efont_name[64];
+		char hcolor_name[64], tcolor_name[64];
+		char ol_en_name[64], ol_sz_name[64], ol_col_name[64];
+		char sh_en_name[64], sh_col_name[64];
+		char sh_ox_name[64], sh_oy_name[64];
+		char hsp_name[64], esp_name[64], secsp_name[64];
+		char remove_name[64], label[64];
 
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-		obs_properties_add_text(props, role_id_keys[i],
-					obs_module_text(role_id_labels[i]),
+		snprintf(group_name, sizeof(group_name), "dsection_%d_group",
+			 i);
+		snprintf(expand_name, sizeof(expand_name),
+			 "dsection_%d_expand", i);
+		snprintf(booster_name, sizeof(booster_name),
+			 "dsection_%d_is_booster", i);
+		snprintf(role_id_name, sizeof(role_id_name),
+			 "dsection_%d_role_id", i);
+		snprintf(heading_name, sizeof(heading_name),
+			 "dsection_%d_heading", i);
+		snprintf(hfont_name, sizeof(hfont_name),
+			 "dsection_%d_heading_font", i);
+		snprintf(efont_name, sizeof(efont_name),
+			 "dsection_%d_entry_font", i);
+		snprintf(align_name, sizeof(align_name),
+			 "dsection_%d_alignment", i);
+		snprintf(hcolor_name, sizeof(hcolor_name),
+			 "dsection_%d_heading_color", i);
+		snprintf(tcolor_name, sizeof(tcolor_name),
+			 "dsection_%d_text_color", i);
+		snprintf(ol_en_name, sizeof(ol_en_name),
+			 "dsection_%d_outline_enabled", i);
+		snprintf(ol_sz_name, sizeof(ol_sz_name),
+			 "dsection_%d_outline_size", i);
+		snprintf(ol_col_name, sizeof(ol_col_name),
+			 "dsection_%d_outline_color", i);
+		snprintf(sh_en_name, sizeof(sh_en_name),
+			 "dsection_%d_shadow_enabled", i);
+		snprintf(sh_col_name, sizeof(sh_col_name),
+			 "dsection_%d_shadow_color", i);
+		snprintf(sh_ox_name, sizeof(sh_ox_name),
+			 "dsection_%d_shadow_offset_x", i);
+		snprintf(sh_oy_name, sizeof(sh_oy_name),
+			 "dsection_%d_shadow_offset_y", i);
+		snprintf(hsp_name, sizeof(hsp_name),
+			 "dsection_%d_heading_spacing", i);
+		snprintf(esp_name, sizeof(esp_name),
+			 "dsection_%d_entry_spacing", i);
+		snprintf(secsp_name, sizeof(secsp_name),
+			 "dsection_%d_section_spacing", i);
+		snprintf(remove_name, sizeof(remove_name),
+			 "dsection_%d_remove", i);
+
+		snprintf(label, sizeof(label), "%s %d",
+			 obs_module_text("DiscordSection"), i + 1);
+
+		obs_properties_t *group = obs_properties_create();
+
+		/* Expand toggle */
+		obs_property_t *exp = obs_properties_add_bool(
+			group, expand_name,
+			obs_module_text("ExpandSection"));
+		obs_property_set_modified_callback2(
+			exp, on_discord_section_expand_toggled, ctx);
+
+		/* Booster toggle */
+		obs_property_t *boost_cb = obs_properties_add_bool(
+			group, booster_name,
+			obs_module_text("FetchBoosters"));
+		obs_property_set_modified_callback2(
+			boost_cb, on_dsection_booster_toggled, ctx);
+
+		/* Role ID */
+		obs_properties_add_text(group, role_id_name,
+					obs_module_text("DiscordRoleID"),
 					OBS_TEXT_DEFAULT);
-		obs_properties_add_text(props, role_heading_keys[i],
-					obs_module_text(role_heading_labels[i]),
+
+		/* Heading */
+		obs_properties_add_text(group, heading_name,
+					obs_module_text("Heading"),
 					OBS_TEXT_DEFAULT);
+
+		/* Heading font */
+		obs_properties_add_font(group, hfont_name,
+					obs_module_text("HeadingFont"));
+
+		/* Entry font (for fetched names) */
+		obs_properties_add_font(group, efont_name,
+					obs_module_text("EntryFont"));
+
+		/* Alignment */
+		obs_property_t *align_prop = obs_properties_add_list(
+			group, align_name, obs_module_text("Alignment"),
+			OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
+		obs_property_list_add_string(
+			align_prop, obs_module_text("AlignLeft"), "left");
+		obs_property_list_add_string(
+			align_prop, obs_module_text("AlignCenter"), "center");
+		obs_property_list_add_string(
+			align_prop, obs_module_text("AlignRight"), "right");
+
+		/* Colors */
+		obs_properties_add_color(group, hcolor_name,
+					 obs_module_text("SectionHeadingColor"));
+		obs_properties_add_color(group, tcolor_name,
+					 obs_module_text("SectionTextColor"));
+
+		/* Outline */
+		obs_property_t *ol_cb = obs_properties_add_bool(
+			group, ol_en_name,
+			obs_module_text("SectionOutlineEnabled"));
+		obs_property_set_modified_callback2(
+			ol_cb, on_dsection_outline_toggled, ctx);
+		obs_properties_add_int(group, ol_sz_name,
+				       obs_module_text("SectionOutlineSize"),
+				       1, 20, 1);
+		obs_properties_add_color(group, ol_col_name,
+					 obs_module_text("SectionOutlineColor"));
+
+		/* Shadow */
+		obs_property_t *sh_cb = obs_properties_add_bool(
+			group, sh_en_name,
+			obs_module_text("SectionShadowEnabled"));
+		obs_property_set_modified_callback2(
+			sh_cb, on_dsection_shadow_toggled, ctx);
+		obs_properties_add_color(group, sh_col_name,
+					 obs_module_text("SectionShadowColor"));
+		obs_properties_add_float(group, sh_ox_name,
+					 obs_module_text("SectionShadowOffsetX"),
+					 -20.0, 20.0, 0.5);
+		obs_properties_add_float(group, sh_oy_name,
+					 obs_module_text("SectionShadowOffsetY"),
+					 -20.0, 20.0, 0.5);
+
+		/* Spacing */
+		obs_properties_add_float(group, hsp_name,
+					 obs_module_text("SectionHeadingSpacing"),
+					 -9999.0, 9999.0, 1.0);
+		obs_properties_add_float(group, esp_name,
+					 obs_module_text("SectionEntrySpacing"),
+					 -9999.0, 9999.0, 1.0);
+		obs_properties_add_float(group, secsp_name,
+					 obs_module_text("SectionSectionSpacing"),
+					 -9999.0, 9999.0, 1.0);
+
+		/* Remove button */
+		obs_property_t *rm = obs_properties_add_button2(
+			group, remove_name,
+			obs_module_text("RemoveDiscordSection"),
+			on_remove_discord_section, ctx);
+		obs_property_set_visible(rm, i < dscount);
+
+		/* Set initial visibility based on expand state */
+		bool expanded = obs_data_get_bool(settings, expand_name);
+		bool is_booster = obs_data_get_bool(settings, booster_name);
+
+		obs_property_set_visible(
+			obs_properties_get(group, booster_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, role_id_name),
+			expanded && !is_booster);
+		obs_property_set_visible(
+			obs_properties_get(group, heading_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, hfont_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, efont_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, align_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, hcolor_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, tcolor_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, ol_en_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_en_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, hsp_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, esp_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, secsp_name), expanded);
+
+		/* Outline sub-properties */
+		bool ol_on = obs_data_get_bool(settings, ol_en_name);
+		obs_property_set_visible(
+			obs_properties_get(group, ol_sz_name),
+			expanded && ol_on);
+		obs_property_set_visible(
+			obs_properties_get(group, ol_col_name),
+			expanded && ol_on);
+
+		/* Shadow sub-properties */
+		bool sh_on = obs_data_get_bool(settings, sh_en_name);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_col_name),
+			expanded && sh_on);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_ox_name),
+			expanded && sh_on);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_oy_name),
+			expanded && sh_on);
+
+		obs_property_t *gp = obs_properties_add_group(
+			props, group_name, label, OBS_GROUP_NORMAL, group);
+		obs_property_set_visible(gp, d_on && i < dscount);
 	}
+
+	obs_property_t *add_ds = obs_properties_add_button2(
+		props, "add_discord_section",
+		obs_module_text("AddDiscordSection"),
+		on_add_discord_section, ctx);
+	obs_property_set_visible(add_ds, d_on);
 
 	obs_property_t *d_fetch = obs_properties_add_button2(
 		props, "discord_fetch", obs_module_text("DiscordFetch"),
 		on_discord_fetch, ctx);
-
-	bool d_on = obs_data_get_bool(settings, "discord_enabled");
-	obs_property_set_visible(d_token, d_on);
-	obs_property_set_visible(d_guild, d_on);
-	obs_property_set_visible(d_bhead, d_on);
-
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-		obs_property_set_visible(
-			obs_properties_get(props, role_id_keys[i]), d_on);
-		obs_property_set_visible(
-			obs_properties_get(props, role_heading_keys[i]), d_on);
-	}
-
 	obs_property_set_visible(d_fetch, d_on);
 
 	obs_data_release(settings);

@@ -142,40 +142,50 @@ static bool member_has_role(const cJSON *member, const char *role_id)
 	return false;
 }
 
-/* ---- Per-role dynamic array helpers ---- */
+/* ---- Per-section dynamic array helpers ---- */
 
-struct role_buf {
+struct section_buf {
 	struct discord_member *members;
 	size_t count;
 	size_t cap;
 };
 
-static void role_buf_push(struct role_buf *rb, const cJSON *member,
-			  bool is_booster)
+static void section_buf_push(struct section_buf *sb, const cJSON *member,
+			     bool is_booster)
 {
-	if (rb->count >= rb->cap) {
-		rb->cap = rb->cap ? rb->cap * 2 : 32;
-		rb->members = brealloc(rb->members,
-				       sizeof(struct discord_member) * rb->cap);
+	if (sb->count >= sb->cap) {
+		sb->cap = sb->cap ? sb->cap * 2 : 32;
+		sb->members = brealloc(sb->members,
+				       sizeof(struct discord_member) * sb->cap);
 	}
-	rb->members[rb->count].display_name = get_display_name(member);
-	rb->members[rb->count].avatar_url = get_avatar_url(member);
-	rb->members[rb->count].is_booster = is_booster;
-	rb->count++;
+	sb->members[sb->count].display_name = get_display_name(member);
+	sb->members[sb->count].avatar_url = get_avatar_url(member);
+	sb->members[sb->count].is_booster = is_booster;
+	sb->count++;
 }
 
 /* ---- Main fetch function ---- */
 
 struct discord_result *discord_fetch(const char *bot_token,
 				     const char *guild_id,
-				     const char *role_ids[DISCORD_MAX_ROLES])
+				     const struct discord_fetch_config *configs,
+				     int num_configs)
 {
 	struct discord_result *result =
 		bzalloc(sizeof(struct discord_result));
 
+	if (num_configs > MAX_DISCORD_SECTIONS)
+		num_configs = MAX_DISCORD_SECTIONS;
+	result->num_sections = num_configs;
+
 	if (!bot_token || bot_token[0] == '\0' || !guild_id ||
 	    guild_id[0] == '\0') {
 		result->error = bstrdup("Bot token and Guild ID are required");
+		return result;
+	}
+
+	if (num_configs <= 0) {
+		result->error = bstrdup("No Discord sections configured");
 		return result;
 	}
 
@@ -193,19 +203,24 @@ struct discord_result *discord_fetch(const char *bot_token,
 	headers = curl_slist_append(headers, auth_header);
 	headers = curl_slist_append(headers, "User-Agent: OBS-Credits/0.1");
 
-	/* Determine which role slots are active */
-	bool role_active[DISCORD_MAX_ROLES] = {false};
+	/* Determine which config slots need role-based matching */
+	bool config_active[MAX_DISCORD_SECTIONS] = {false};
+	bool any_booster = false;
 	int active_role_count = 0;
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-		if (role_ids && role_ids[i] && role_ids[i][0] != '\0') {
-			role_active[i] = true;
+	for (int i = 0; i < num_configs; i++) {
+		if (configs[i].is_booster) {
+			config_active[i] = true;
+			any_booster = true;
+		} else if (configs[i].role_id &&
+			   configs[i].role_id[0] != '\0') {
+			config_active[i] = true;
 			active_role_count++;
 		}
 	}
 
-	/* Dynamic arrays for boosters and each role bucket */
-	struct role_buf boosters_buf = {NULL, 0, 0};
-	struct role_buf role_bufs[DISCORD_MAX_ROLES] = {{NULL, 0, 0}};
+	/* Dynamic arrays for each section */
+	struct section_buf bufs[MAX_DISCORD_SECTIONS];
+	memset(bufs, 0, sizeof(bufs));
 
 	size_t members_count = 0;
 	char after[64] = "0";
@@ -245,21 +260,29 @@ struct discord_result *discord_fetch(const char *bot_token,
 						 id->valuestring);
 			}
 
-			/* Check booster */
+			/* Check booster status once */
 			const cJSON *premium =
 				cJSON_GetObjectItem(member, "premium_since");
-			if (cJSON_IsString(premium) &&
-			    premium->valuestring[0] != '\0') {
-				role_buf_push(&boosters_buf, member, true);
-			}
+			bool is_booster =
+				cJSON_IsString(premium) &&
+				premium->valuestring[0] != '\0';
 
-			/* Check each active role slot */
-			for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-				if (!role_active[i])
+			/* Check each active config */
+			for (int i = 0; i < num_configs; i++) {
+				if (!config_active[i])
 					continue;
-				if (member_has_role(member, role_ids[i]))
-					role_buf_push(&role_bufs[i], member,
-						      false);
+
+				if (configs[i].is_booster) {
+					if (is_booster)
+						section_buf_push(&bufs[i],
+								 member, true);
+				} else {
+					if (member_has_role(member,
+							    configs[i].role_id))
+						section_buf_push(&bufs[i],
+								 member,
+								 false);
+				}
 			}
 
 			members_count++;
@@ -275,19 +298,20 @@ struct discord_result *discord_fetch(const char *bot_token,
 	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 
-	result->boosters = boosters_buf.members;
-	result->num_boosters = boosters_buf.count;
-
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-		result->roles[i].members = role_bufs[i].members;
-		result->roles[i].num_members = role_bufs[i].count;
+	for (int i = 0; i < num_configs; i++) {
+		result->sections[i].members = bufs[i].members;
+		result->sections[i].num_members = bufs[i].count;
 	}
 
 	if (!result->error) {
+		size_t total_members = 0;
+		for (int i = 0; i < num_configs; i++)
+			total_members += bufs[i].count;
+
 		blog(LOG_INFO,
 		     "[obs-credits] Discord fetch: %zu members scanned, "
-		     "%zu boosters, %d active role slots",
-		     members_count, boosters_buf.count, active_role_count);
+		     "%d sections configured, %zu total matched members",
+		     members_count, num_configs, total_members);
 	}
 
 	return result;
@@ -298,18 +322,12 @@ void discord_result_free(struct discord_result *result)
 	if (!result)
 		return;
 
-	for (size_t i = 0; i < result->num_boosters; i++) {
-		bfree(result->boosters[i].display_name);
-		bfree(result->boosters[i].avatar_url);
-	}
-	bfree(result->boosters);
-
-	for (int i = 0; i < DISCORD_MAX_ROLES; i++) {
-		for (size_t j = 0; j < result->roles[i].num_members; j++) {
-			bfree(result->roles[i].members[j].display_name);
-			bfree(result->roles[i].members[j].avatar_url);
+	for (int i = 0; i < result->num_sections; i++) {
+		for (size_t j = 0; j < result->sections[i].num_members; j++) {
+			bfree(result->sections[i].members[j].display_name);
+			bfree(result->sections[i].members[j].avatar_url);
 		}
-		bfree(result->roles[i].members);
+		bfree(result->sections[i].members);
 	}
 
 	bfree(result->error);
