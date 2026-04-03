@@ -35,7 +35,9 @@ struct credits_source {
 	struct credits_layout *layout;
 	gs_texrender_t *texrender;
 	bool needs_rebuild;
-	int skip_render;     /* frames to show old texture after rebuild */
+	gs_texrender_t *texrender_back; /* backup texrender for seamless swap */
+	bool swap_pending;   /* true while new layout warms up */
+	int warmup_frames;
 	struct credits_layout *pending_free;
 	float scroll_offset;
 	float current_speed;
@@ -1454,6 +1456,7 @@ static void credits_destroy(void *data)
 
 	obs_enter_graphics();
 	gs_texrender_destroy(ctx->texrender);
+	gs_texrender_destroy(ctx->texrender_back);
 	obs_leave_graphics();
 
 	obs_hotkey_unregister(ctx->hotkey_start);
@@ -1970,7 +1973,8 @@ static void credits_video_tick(void *data, float seconds)
 				credits_renderer_free(ctx->pending_free);
 			ctx->pending_free = ctx->layout;
 			ctx->layout = new_layout;
-			ctx->skip_render = 4; /* show old texture for 4 frames */
+			ctx->swap_pending = true;
+			ctx->warmup_frames = 0;
 		}
 		ctx->needs_rebuild = false;
 	}
@@ -2080,41 +2084,77 @@ static void credits_video_render(void *data, gs_effect_t *effect)
 
 	if (!ctx->texrender)
 		ctx->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	if (!ctx->texrender_back)
+		ctx->texrender_back = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 
-	/* On the first frame after a rebuild, skip re-rendering so the old
-	 * texture stays on screen for one frame while new text sources init.
-	 * This eliminates the 1-frame black flash on layout rebuild. */
-	if (ctx->skip_render > 0) {
-		ctx->skip_render--;
-	} else {
-		gs_texrender_reset(ctx->texrender);
-
-		if (gs_texrender_begin(ctx->texrender, ctx->width, ctx->height)) {
-			struct vec4 clear_color;
-			vec4_zero(&clear_color);
-			gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
-
+	if (ctx->swap_pending) {
+		/* Render new layout to BACKUP texrender while main keeps
+		 * displaying the old frame. After 4 frames of warmup,
+		 * swap the texrenders so the new one becomes primary. */
+		gs_texrender_reset(ctx->texrender_back);
+		if (gs_texrender_begin(ctx->texrender_back, ctx->width,
+				       ctx->height)) {
+			struct vec4 cc;
+			vec4_zero(&cc);
+			gs_clear(GS_CLEAR_COLOR, &cc, 0.0f, 0);
 			gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
 				 ctx->scroll_offset + (float)ctx->height,
 				 -1.0f, 1.0f);
-
 			credits_renderer_draw(ctx->layout, ctx->width,
 					      ctx->scroll_offset,
 					      (float)ctx->height);
+			gs_texrender_end(ctx->texrender_back);
+		}
 
+		ctx->warmup_frames++;
+		if (ctx->warmup_frames >= 4) {
+			/* Swap: backup becomes primary */
+			gs_texrender_t *tmp = ctx->texrender;
+			ctx->texrender = ctx->texrender_back;
+			ctx->texrender_back = tmp;
+			ctx->swap_pending = false;
+		}
+
+		/* Display the OLD (main) texrender during warmup */
+		gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
+		if (tex) {
+			gs_effect_t *def =
+				obs_get_base_effect(OBS_EFFECT_DEFAULT);
+			gs_eparam_t *param =
+				gs_effect_get_param_by_name(def, "image");
+			gs_effect_set_texture(param, tex);
+			while (gs_effect_loop(def, "Draw"))
+				gs_draw_sprite(tex, 0, ctx->width,
+					       ctx->height);
+		}
+	} else {
+		/* Normal rendering: render layout to primary texrender */
+		gs_texrender_reset(ctx->texrender);
+		if (gs_texrender_begin(ctx->texrender, ctx->width,
+				       ctx->height)) {
+			struct vec4 cc;
+			vec4_zero(&cc);
+			gs_clear(GS_CLEAR_COLOR, &cc, 0.0f, 0);
+			gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
+				 ctx->scroll_offset + (float)ctx->height,
+				 -1.0f, 1.0f);
+			credits_renderer_draw(ctx->layout, ctx->width,
+					      ctx->scroll_offset,
+					      (float)ctx->height);
 			gs_texrender_end(ctx->texrender);
 		}
-	}
 
-	gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
-	if (tex) {
-		gs_effect_t *def = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-		gs_eparam_t *param =
-			gs_effect_get_param_by_name(def, "image");
-		gs_effect_set_texture(param, tex);
-
-		while (gs_effect_loop(def, "Draw"))
-			gs_draw_sprite(tex, 0, ctx->width, ctx->height);
+		gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
+		if (tex) {
+			gs_effect_t *def =
+				obs_get_base_effect(OBS_EFFECT_DEFAULT);
+			gs_eparam_t *param =
+				gs_effect_get_param_by_name(def, "image");
+			gs_effect_set_texture(param, tex);
+			while (gs_effect_loop(def, "Draw"))
+				gs_draw_sprite(tex, 0, ctx->width,
+					       ctx->height);
+		}
 	}
 
 	pthread_mutex_unlock(&ctx->mutex);
