@@ -237,11 +237,17 @@ struct credits_layout *credits_renderer_build(
 		bool ol_enabled = section->outline_enabled;
 		int ol_size = section->outline_size;
 		uint32_t ol_color = section->outline_color;
+		bool ol_heading = section->outline_heading;
+		bool ol_sub = section->outline_sub;
+		bool ol_entries = section->outline_entries;
 
 		bool sh_enabled = section->shadow_enabled;
 		uint32_t sh_color = section->shadow_color;
 		float sh_off_x = section->shadow_offset_x;
 		float sh_off_y = section->shadow_offset_y;
+		bool sh_heading = section->shadow_heading;
+		bool sh_sub = section->shadow_sub;
+		bool sh_entries = section->shadow_entries;
 
 		/* --- Heading --- */
 		const char *h_font = section->heading_face
@@ -258,17 +264,20 @@ struct credits_layout *credits_renderer_build(
 
 		snprintf(name_buf, sizeof(name_buf), "credits_heading_%zu", s);
 
+		bool heading_ol = ol_enabled && ol_heading;
+		bool heading_sh = sh_enabled && sh_heading;
+
 		struct layout_elem *he = &layout->elems[elem_idx++];
 		he->type = ELEM_TEXT;
 		he->align = section_align_id;
 		he->text_source = make_text_source(
 			name_buf, heading_text, h_font, h_size, h_flags,
-			h_color, ol_enabled, ol_size, ol_color);
+			h_color, heading_ol, ol_size, ol_color);
 		he->height = text_source_height(he->text_source, h_size);
 		he->x = 0.0f;
 		he->y = y_cursor;
 
-		if (sh_enabled) {
+		if (heading_sh) {
 			char sname[128];
 			snprintf(sname, sizeof(sname),
 				 "credits_heading_%zu_sh", s);
@@ -384,6 +393,11 @@ struct credits_layout *credits_renderer_build(
 				break;
 			}
 
+			/* Determine per-field outline/shadow applicability */
+			bool is_sub_entry = (entry->type == CREDITS_ENTRY_TEXT && first_entry);
+			bool entry_ol = ol_enabled && (is_sub_entry ? ol_sub : ol_entries);
+			bool entry_sh = sh_enabled && (is_sub_entry ? sh_sub : sh_entries);
+
 			/* Text entry (NAME_ROLE, NAME_ONLY, TEXT) */
 			snprintf(name_buf, sizeof(name_buf),
 				 "credits_entry_%zu_%zu", s, e);
@@ -392,13 +406,13 @@ struct credits_layout *credits_renderer_build(
 			le->text_source = make_text_source(
 				name_buf, entry_text, e_font,
 				e_size, e_flags,
-				e_color, ol_enabled, ol_size, ol_color);
+				e_color, entry_ol, ol_size, ol_color);
 			le->height = text_source_height(le->text_source,
 							e_size);
 			le->x = 0.0f;
 			le->y = y_cursor;
 
-			if (sh_enabled) {
+			if (entry_sh) {
 				char sname[128];
 				snprintf(sname, sizeof(sname),
 					 "credits_sh_%zu_%zu", s, e);

@@ -353,6 +353,12 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 			(int)obs_data_get_int(sec, "outline_size");
 		section->outline_color =
 			(uint32_t)obs_data_get_int(sec, "outline_color");
+		section->outline_heading =
+			obs_data_get_bool(sec, "outline_heading");
+		section->outline_sub =
+			obs_data_get_bool(sec, "outline_sub");
+		section->outline_entries =
+			obs_data_get_bool(sec, "outline_entries");
 
 		/* Read per-section shadow */
 		section->shadow_enabled =
@@ -363,6 +369,12 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 			(float)obs_data_get_double(sec, "shadow_offset_x");
 		section->shadow_offset_y =
 			(float)obs_data_get_double(sec, "shadow_offset_y");
+		section->shadow_heading =
+			obs_data_get_bool(sec, "shadow_heading");
+		section->shadow_sub =
+			obs_data_get_bool(sec, "shadow_sub");
+		section->shadow_entries =
+			obs_data_get_bool(sec, "shadow_entries");
 
 		/* Read per-section spacing */
 		section->heading_spacing =

@@ -48,12 +48,18 @@ struct credits_section {
 	bool outline_enabled;
 	int outline_size;
 	uint32_t outline_color;
+	bool outline_heading;
+	bool outline_sub;
+	bool outline_entries;
 
 	/* Per-section shadow */
 	bool shadow_enabled;
 	uint32_t shadow_color;
 	float shadow_offset_x;
 	float shadow_offset_y;
+	bool shadow_heading;
+	bool shadow_sub;
+	bool shadow_entries;
 
 	/* Per-section spacing */
 	float heading_spacing;  /* heading -> sub, 0=auto */
