@@ -1,63 +1,85 @@
 # OBS Credits Plugin
 
-A customizable credits roll plugin for OBS Studio. Add professional, scrolling end credits to your streams and recordings - just like in movies and TV.
+A fully customizable scrolling credits source for OBS Studio with Discord and YouTube live chat integration. Add professional end credits to your streams - with live chatter names populated automatically.
+
+![Preview](images/Preview.png)
 
 ## Features
 
-- **Scrolling credits roll** - Smooth, GPU-accelerated vertical scroll
-- **Customizable text** - Set titles, names, roles, and sections via OBS properties
-- **Styling options** - Font, size, color, alignment, and spacing controls
-- **Speed control** - Adjustable scroll speed to match your content
-- **Loop / one-shot modes** - Roll once and stop, or loop continuously
-- **Localization ready** - All UI strings support translation
+- **Scrolling credits roll** - Smooth, GPU-accelerated vertical scroll with configurable speed
+- **Dynamic sections** - Add/remove as many sections as you need, each fully customizable
+- **Per-section styling** - Fonts, colors, alignment, outline, shadow, and spacing per section
+- **Discord integration** - Auto-fetch server members by role on scene switch
+- **YouTube live chat** - Collect unique chatter names during your stream (no API key needed)
+- **Hotkeys** - Start/Restart, Pause/Resume, Stop via OBS hotkeys
+- **Start & loop delays** - Configurable delays before scrolling and between loops
+- **Flicker-free updates** - Two-layer rendering for seamless live data updates
+
+## Screenshots
+
+### Manual Sections
+Add headings, sub-headings, names, and roles with individual font pickers and full styling controls.
+
+![Manual Input](images/ManualInput.png)
+
+### Discord Integration
+Fetch server members by role ID. Auto-fetches when you switch to the credits scene.
+
+![Discord Integration](images/DiscordIntegration.png)
+
+### YouTube Live Chat
+Paste your channel URL and chatters are collected automatically during your stream.
+
+![YouTube Chatters](images/YoutubeChatters.png)
 
 ## Installation
 
 ### Windows
 
-1. Download the latest release `.zip`
-2. Extract to `%APPDATA%/obs-studio/plugins/obs-credits/`
-3. Restart OBS Studio
-
-Your folder structure should look like:
-```
-%APPDATA%/obs-studio/plugins/obs-credits/
-├── bin/
-│   └── 64bit/
-│       └── obs-credits.dll
-└── data/
-    └── locale/
-        └── en-US.ini
-```
-
-### macOS
-
-1. Download the latest release `.tar.gz`
-2. Extract to `~/Library/Application Support/obs-studio/plugins/obs-credits/`
-3. Restart OBS Studio
-
-### Linux
-
-1. Download the latest release `.tar.gz`
-2. Extract to `~/.config/obs-studio/plugins/obs-credits/`
-3. Restart OBS Studio
+1. Download the latest `obs-credits-x.x.x-windows-x64-installer.exe` from [Releases](https://github.com/KiernenIrons/obs-credits/releases)
+2. Close OBS Studio
+3. Run the installer (requires admin)
+4. Open OBS Studio and add a **"Credits"** source
 
 ## Usage
 
 1. In OBS, click **+** under Sources
-2. Select **Credits Roll**
-3. Configure your credits text and styling in the source properties
-4. Position and resize the source in your scene
-5. Use Studio Mode or scene transitions to trigger the credits during your stream
+2. Select **Credits**
+3. Add sections with headings, names, and roles
+4. Customize fonts, colors, outline, shadow, and spacing per section
+5. Optionally enable Discord and/or YouTube chat integration
+6. Switch to the credits scene at the end of your stream
+
+### Discord Setup
+
+1. Create a bot at https://discord.com/developers/applications
+2. Enable **Server Members Intent** (privileged)
+3. Invite bot with scope `bot` and permission `1024`
+4. In the plugin: enter Bot Token, Guild ID, and add Discord sections with Role IDs
+5. Click **Fetch Discord Data** or switch to the scene (auto-fetches)
+
+### YouTube Chat Setup
+
+1. Enable **YouTube Chat Credits** in the plugin properties
+2. Paste your channel URL (e.g. `https://youtube.com/@yourchannel`)
+3. Click **Start Collecting Chatters** or just start streaming - it auto-detects
+4. Unique chatter names populate live and clear at each stream start
+
+### Hotkeys
+
+Bind these in **OBS Settings > Hotkeys**:
+- **Start/Restart Credits** - Reset and start scrolling
+- **Pause/Resume Credits** - Freeze/unfreeze at current position
+- **Stop Credits** - Stop and reset to beginning
 
 ## Building from Source
 
 ### Requirements
 
-- OBS Studio 30+ (with development headers)
+- OBS Studio 30+ (tested with 32.1.0)
 - CMake 3.16+
-- C11/C++17 compiler
-- Platform SDK (Windows SDK / macOS SDK / Linux dev packages)
+- Visual Studio 2022 Build Tools (Windows)
+- OBS source code (for headers)
 
 ### Build
 
@@ -66,57 +88,12 @@ cmake --preset default
 cmake --build build --config Release
 ```
 
-### Install locally
+## Author
 
-```bash
-cmake --install build --config Release --prefix <obs-plugins-dir>
-```
+**Kiernen Irons** - Design, development, and maintenance.
 
-## Project Structure
-
-```
-obs-credits/
-├── CMakeLists.txt           # Build configuration
-├── CMakePresets.json         # CMake presets
-├── src/
-│   ├── plugin-main.c        # Plugin entry point
-│   ├── credits-source.c     # Credits roll source implementation
-│   └── credits-source.h     # Header
-├── data/
-│   └── locale/
-│       └── en-US.ini        # English locale strings
-├── .claude/
-│   ├── settings.json        # Claude Code hooks & config
-│   └── skills/
-│       ├── code-check.md    # Pre-commit code review skill
-│       └── commit.md        # Git commit skill
-├── CLAUDE.md                # Development guidelines
-└── README.md                # This file
-```
-
-## Configuration Options
-
-| Property       | Type   | Description                          | Default       |
-|---------------|--------|--------------------------------------|---------------|
-| Credits Text  | text   | The full credits content (multiline) | -             |
-| Font          | font   | Font family and style                | System default|
-| Font Size     | int    | Text size in points                  | 36            |
-| Text Color    | color  | Text color                           | White         |
-| Background    | color  | Background color                     | Transparent   |
-| Scroll Speed  | float  | Pixels per frame                     | 2.0           |
-| Alignment     | list   | Left / Center / Right                | Center        |
-| Loop          | bool   | Restart after finishing               | false         |
-
-## Contributing
-
-This plugin is developed by **Kiernen Irons**.
-
-If you'd like to report a bug or request a feature, please open an issue on the repository.
+Built with [Claude Code](https://claude.ai/code) (Claude Opus 4.6).
 
 ## License
 
 See [LICENSE](LICENSE) for details.
-
-## Author
-
-**Kiernen Irons** - Design, development, and maintenance.
