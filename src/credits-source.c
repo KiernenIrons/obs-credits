@@ -2033,7 +2033,7 @@ static void credits_video_tick(void *data, float seconds)
 	/* Poll YouTube chat count every ~2 seconds.
 	 * Must NOT hold the mutex when calling obs_source_update. */
 	ctx->yt_poll_timer += seconds;
-	if (ctx->yt_poll_timer >= 15.0f) {
+	if (ctx->yt_poll_timer >= 10.0f) {
 		ctx->yt_poll_timer = 0.0f;
 
 		pthread_mutex_lock(&ctx->mutex);
@@ -2054,7 +2054,7 @@ static void credits_video_tick(void *data, float seconds)
 			if (changed) {
 				obs_data_t *s =
 					obs_source_get_settings(ctx->self);
-				credits_update(ctx, s);
+				obs_source_update(ctx->self, s);
 				obs_data_release(s);
 			}
 		}
