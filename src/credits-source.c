@@ -48,6 +48,7 @@ struct credits_source {
 	/* Discord - fetched data stored as text for injection into sections */
 	char *discord_sections[MAX_DISCORD_SECTIONS]; /* newline-separated names per section */
 	bool discord_fetching;
+	bool discord_has_fetched; /* true after first successful fetch */
 
 	pthread_mutex_t mutex;
 };
@@ -721,6 +722,7 @@ static void *discord_fetch_thread(void *arg)
 			bfree(ctx->discord_sections[i]);
 			ctx->discord_sections[i] = section_texts[i];
 		}
+		ctx->discord_has_fetched = true;
 		pthread_mutex_unlock(&ctx->mutex);
 
 		size_t total_members = 0;
@@ -809,6 +811,10 @@ static void start_discord_fetch(struct credits_source *ctx)
 		args->configs[i].is_booster =
 			obs_data_get_bool(settings, key);
 
+		blog(LOG_INFO,
+		     "[obs-credits] Discord section %d: is_booster=%s",
+		     i, args->configs[i].is_booster ? "true" : "false");
+
 		if (!args->configs[i].is_booster) {
 			snprintf(key, sizeof(key), "dsection_%d_role_id", i);
 			const char *rid =
@@ -843,7 +849,14 @@ static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
 static void credits_activate(void *data)
 {
 	struct credits_source *ctx = data;
-	start_discord_fetch(ctx);
+	/* Only auto-refresh Discord data if it was previously fetched.
+	 * First fetch must be triggered manually via the Fetch button
+	 * so the user has time to configure sections first. */
+	pthread_mutex_lock(&ctx->mutex);
+	bool should_fetch = ctx->discord_has_fetched;
+	pthread_mutex_unlock(&ctx->mutex);
+	if (should_fetch)
+		start_discord_fetch(ctx);
 }
 
 static bool on_discord_toggled(void *data, obs_properties_t *props,
