@@ -35,7 +35,7 @@ struct credits_source {
 	struct credits_layout *layout;
 	gs_texrender_t *texrender;
 	bool needs_rebuild;
-	bool skip_render;    /* true for 1 frame after rebuild: show old tex */
+	int skip_render;     /* frames to show old texture after rebuild */
 	struct credits_layout *pending_free;
 	float scroll_offset;
 	float current_speed;
@@ -1970,7 +1970,7 @@ static void credits_video_tick(void *data, float seconds)
 				credits_renderer_free(ctx->pending_free);
 			ctx->pending_free = ctx->layout;
 			ctx->layout = new_layout;
-			ctx->skip_render = true;
+			ctx->skip_render = 4; /* show old texture for 4 frames */
 		}
 		ctx->needs_rebuild = false;
 	}
@@ -2084,8 +2084,8 @@ static void credits_video_render(void *data, gs_effect_t *effect)
 	/* On the first frame after a rebuild, skip re-rendering so the old
 	 * texture stays on screen for one frame while new text sources init.
 	 * This eliminates the 1-frame black flash on layout rebuild. */
-	if (ctx->skip_render) {
-		ctx->skip_render = false;
+	if (ctx->skip_render > 0) {
+		ctx->skip_render--;
 	} else {
 		gs_texrender_reset(ctx->texrender);
 
