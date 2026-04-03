@@ -40,6 +40,7 @@ struct credits_source {
 	bool scrolling;
 	bool started;
 	bool waiting_loop;
+	bool needs_rebuild;
 	bool paused;
 
 	/* Hotkeys */
@@ -846,14 +847,20 @@ static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
 static void credits_activate(void *data)
 {
 	struct credits_source *ctx = data;
-	/* Only auto-refresh Discord data if it was previously fetched.
-	 * First fetch must be triggered manually via the Fetch button
-	 * so the user has time to configure sections first. */
+
+	/* Restart scroll from beginning (respects start delay) */
 	pthread_mutex_lock(&ctx->mutex);
-	bool should_fetch = ctx->discord_has_fetched;
+	ctx->scroll_offset = -(float)ctx->height;
+	ctx->current_speed = 0.0f;
+	ctx->scrolling = true;
+	ctx->started = false;
+	ctx->paused = false;
+	ctx->waiting_loop = false;
+	ctx->delay_timer = 0.0f;
 	pthread_mutex_unlock(&ctx->mutex);
-	if (should_fetch)
-		start_discord_fetch(ctx);
+
+	/* Always fetch Discord data on scene activation */
+	start_discord_fetch(ctx);
 }
 
 static bool on_discord_toggled(void *data, obs_properties_t *props,
@@ -1470,10 +1477,11 @@ static void credits_update(void *data, obs_data_t *settings)
 
 	pthread_mutex_lock(&ctx->mutex);
 
-	struct credits_layout *old_layout = ctx->layout;
-	struct credits_data *old_data = ctx->data;
-	ctx->layout = NULL;
+	/* Free old data but keep old layout alive until video_tick
+	 * builds the replacement. This prevents a 1-frame gap (flicker). */
+	credits_data_free(ctx->data);
 	ctx->data = NULL;
+	ctx->needs_rebuild = true;
 
 	ctx->scroll_speed = speed > 0.0 ? (float)speed : 60.0f;
 	ctx->loop = loop_val;
@@ -1800,9 +1808,6 @@ static void credits_update(void *data, obs_data_t *settings)
 	pthread_mutex_unlock(&ctx->mutex);
 
 	obs_data_release(tmp);
-
-	credits_renderer_free(old_layout);
-	credits_data_free(old_data);
 }
 
 static void credits_get_defaults(obs_data_t *settings)
@@ -1917,13 +1922,27 @@ static void credits_video_tick(void *data, float seconds)
 
 	pthread_mutex_lock(&ctx->mutex);
 
-	if (ctx->data && !ctx->layout) {
-		ctx->layout = credits_renderer_build(
-			ctx->data, ctx->width,
-			ctx->default_font_face, ctx->default_font_size);
-		if (ctx->layout)
+	if (ctx->data && (ctx->needs_rebuild || !ctx->layout)) {
+		/* Build new layout, then swap - keeps old layout visible
+		 * during build so there's no 1-frame flicker gap. */
+		struct credits_layout *new_layout =
+			credits_renderer_build(
+				ctx->data, ctx->width,
+				ctx->default_font_face,
+				ctx->default_font_size);
+		if (new_layout) {
+			struct credits_layout *old = ctx->layout;
+			ctx->layout = new_layout;
 			ctx->total_height =
-				credits_renderer_total_height(ctx->layout);
+				credits_renderer_total_height(new_layout);
+			ctx->needs_rebuild = false;
+			/* Free old layout outside mutex */
+			pthread_mutex_unlock(&ctx->mutex);
+			credits_renderer_free(old);
+			pthread_mutex_lock(&ctx->mutex);
+		} else {
+			ctx->needs_rebuild = false;
+		}
 	}
 
 	if (ctx->scrolling && ctx->layout) {
