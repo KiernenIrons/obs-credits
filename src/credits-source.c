@@ -698,30 +698,49 @@ static void *discord_fetch_thread(void *arg)
 	return NULL;
 }
 
-static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
-			     void *data)
+/* Shared helper: start Discord fetch on background thread */
+static void start_discord_fetch(struct credits_source *ctx)
 {
-	UNUSED_PARAMETER(props);
-	UNUSED_PARAMETER(prop);
-
-	struct credits_source *ctx = data;
-
 	pthread_mutex_lock(&ctx->mutex);
 	if (ctx->discord_fetching) {
 		pthread_mutex_unlock(&ctx->mutex);
-		return false;
+		return;
 	}
 	ctx->discord_fetching = true;
 	pthread_mutex_unlock(&ctx->mutex);
 
 	obs_data_t *settings = obs_source_get_settings(ctx->self);
+
+	if (!obs_data_get_bool(settings, "discord_enabled")) {
+		obs_data_release(settings);
+		pthread_mutex_lock(&ctx->mutex);
+		ctx->discord_fetching = false;
+		pthread_mutex_unlock(&ctx->mutex);
+		return;
+	}
+
 	const char *token = obs_data_get_string(settings, "discord_token");
 	const char *guild = obs_data_get_string(settings, "discord_guild_id");
+
+	if (!token || token[0] == '\0' || !guild || guild[0] == '\0') {
+		obs_data_release(settings);
+		pthread_mutex_lock(&ctx->mutex);
+		ctx->discord_fetching = false;
+		pthread_mutex_unlock(&ctx->mutex);
+		return;
+	}
 
 	int dscount =
 		(int)obs_data_get_int(settings, "discord_section_count");
 	if (dscount > MAX_DISCORD_SECTIONS)
 		dscount = MAX_DISCORD_SECTIONS;
+	if (dscount <= 0) {
+		obs_data_release(settings);
+		pthread_mutex_lock(&ctx->mutex);
+		ctx->discord_fetching = false;
+		pthread_mutex_unlock(&ctx->mutex);
+		return;
+	}
 
 	struct discord_fetch_args *args =
 		bzalloc(sizeof(struct discord_fetch_args));
@@ -752,8 +771,22 @@ static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
 	pthread_t thread;
 	pthread_create(&thread, NULL, discord_fetch_thread, args);
 	pthread_detach(thread);
+}
 
+static bool on_discord_fetch(obs_properties_t *props, obs_property_t *prop,
+			     void *data)
+{
+	UNUSED_PARAMETER(props);
+	UNUSED_PARAMETER(prop);
+	start_discord_fetch(data);
 	return false;
+}
+
+/* Called when the source becomes visible (scene switched to) */
+static void credits_activate(void *data)
+{
+	struct credits_source *ctx = data;
+	start_discord_fetch(ctx);
 }
 
 static bool on_discord_toggled(void *data, obs_properties_t *props,
@@ -2112,6 +2145,7 @@ struct obs_source_info credits_source_info = {
 	.get_name = credits_get_name,
 	.create = credits_create,
 	.destroy = credits_destroy,
+	.activate = credits_activate,
 	.update = credits_update,
 	.video_tick = credits_video_tick,
 	.video_render = credits_video_render,
