@@ -1981,57 +1981,63 @@ static void credits_video_tick(void *data, float seconds)
 			ctx->started = true;
 		}
 
-		if (ctx->paused) {
-			pthread_mutex_unlock(&ctx->mutex);
-			return;
-		}
+		if (!ctx->paused) {
+			bool do_scroll = true;
 
-		/* Start delay */
-		if (ctx->start_delay > 0.0f &&
-		    ctx->delay_timer < ctx->start_delay) {
-			ctx->delay_timer += seconds;
-			pthread_mutex_unlock(&ctx->mutex);
-			return;
-		}
-
-		/* Loop delay */
-		if (ctx->waiting_loop) {
-			ctx->delay_timer += seconds;
-			if (ctx->delay_timer >= ctx->loop_delay) {
-				ctx->waiting_loop = false;
-				ctx->scroll_offset = -(float)ctx->height;
-				ctx->current_speed = 0.0f;
-				ctx->delay_timer = ctx->start_delay;
+			/* Start delay */
+			if (ctx->start_delay > 0.0f &&
+			    ctx->delay_timer < ctx->start_delay) {
+				ctx->delay_timer += seconds;
+				do_scroll = false;
 			}
-			pthread_mutex_unlock(&ctx->mutex);
-			return;
-		}
 
-		ctx->current_speed +=
-			(ctx->scroll_speed - ctx->current_speed) * 5.0f *
-			seconds;
-		ctx->scroll_offset += ctx->current_speed * seconds;
-
-		if (ctx->scroll_offset > ctx->total_height) {
-			if (ctx->loop) {
-				if (ctx->loop_delay > 0.0f) {
-					ctx->waiting_loop = true;
-					ctx->delay_timer = 0.0f;
-				} else {
+			/* Loop delay */
+			if (do_scroll && ctx->waiting_loop) {
+				ctx->delay_timer += seconds;
+				if (ctx->delay_timer >= ctx->loop_delay) {
+					ctx->waiting_loop = false;
 					ctx->scroll_offset =
 						-(float)ctx->height;
 					ctx->current_speed = 0.0f;
+					ctx->delay_timer = ctx->start_delay;
 				}
-			} else {
-				ctx->scrolling = false;
+				do_scroll = false;
+			}
+
+			if (do_scroll) {
+				ctx->current_speed +=
+					(ctx->scroll_speed -
+					 ctx->current_speed) *
+					5.0f * seconds;
+				ctx->scroll_offset +=
+					ctx->current_speed * seconds;
+
+				if (ctx->scroll_offset > ctx->total_height) {
+					if (ctx->loop) {
+						if (ctx->loop_delay > 0.0f) {
+							ctx->waiting_loop =
+								true;
+							ctx->delay_timer =
+								0.0f;
+						} else {
+							ctx->scroll_offset =
+								-(float)ctx
+									 ->height;
+							ctx->current_speed =
+								0.0f;
+						}
+					} else {
+						ctx->scrolling = false;
+					}
+				}
 			}
 		}
 	}
 
 	pthread_mutex_unlock(&ctx->mutex);
 
-	/* Poll YouTube chat count every ~2 seconds.
-	 * Must NOT hold the mutex when calling obs_source_update. */
+	/* Poll YouTube chat count - MUST be after mutex unlock and
+	 * MUST NOT be blocked by early returns from scroll logic. */
 	ctx->yt_poll_timer += seconds;
 	if (ctx->yt_poll_timer >= 10.0f) {
 		ctx->yt_poll_timer = 0.0f;
