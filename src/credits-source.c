@@ -1963,14 +1963,29 @@ static void credits_video_tick(void *data, float seconds)
 	pthread_mutex_lock(&ctx->mutex);
 
 	if (ctx->data && (ctx->needs_rebuild || !ctx->layer[ctx->display_layer].layout)) {
-		/* Build into the NON-displayed layer */
-		int target = 1 - ctx->display_layer;
-		credits_renderer_free(ctx->layer[target].layout);
-		ctx->layer[target].layout = credits_renderer_build(
-			ctx->data, ctx->width,
-			ctx->default_font_face,
-			ctx->default_font_size);
-		ctx->rebuild_warmup = 0;
+		bool first_build = !ctx->layer[0].layout && !ctx->layer[1].layout;
+
+		if (first_build) {
+			/* First build: put directly into displayed layer
+			 * so content shows immediately */
+			ctx->layer[ctx->display_layer].layout =
+				credits_renderer_build(
+					ctx->data, ctx->width,
+					ctx->default_font_face,
+					ctx->default_font_size);
+			ctx->rebuild_warmup = -1;
+		} else {
+			/* Subsequent rebuilds: build into non-displayed layer,
+			 * warm up for 3 frames, then swap */
+			int target = 1 - ctx->display_layer;
+			credits_renderer_free(ctx->layer[target].layout);
+			ctx->layer[target].layout =
+				credits_renderer_build(
+					ctx->data, ctx->width,
+					ctx->default_font_face,
+					ctx->default_font_size);
+			ctx->rebuild_warmup = 0;
+		}
 		ctx->needs_rebuild = false;
 	}
 
@@ -1981,7 +1996,12 @@ static void credits_video_tick(void *data, float seconds)
 			int target = 1 - ctx->display_layer;
 			if (ctx->layer[target].layout) {
 				ctx->display_layer = target;
+				/* Free the old displayed layer now that we swapped */
+				int old = 1 - ctx->display_layer;
+				credits_renderer_free(ctx->layer[old].layout);
+				ctx->layer[old].layout = NULL;
 			}
+			ctx->rebuild_warmup = -1;
 		}
 	}
 
