@@ -2075,7 +2075,7 @@ static void credits_video_tick(void *data, float seconds)
 	/* Poll YouTube chat count - MUST be after mutex unlock and
 	 * MUST NOT be blocked by early returns from scroll logic. */
 	ctx->yt_poll_timer += seconds;
-	if (ctx->yt_poll_timer >= 10.0f) {
+	if (ctx->yt_poll_timer >= 3.0f) {
 		ctx->yt_poll_timer = 0.0f;
 
 		pthread_mutex_lock(&ctx->mutex);
