@@ -120,7 +120,7 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 static float text_source_height(obs_source_t *source, int font_size)
 {
 	uint32_t h = obs_source_get_height(source);
-	float min_h = (float)font_size * 1.2f;
+	float min_h = (float)font_size * 1.4f;
 	float result = h > 0 ? (float)h : (float)font_size * 1.5f;
 	return result > min_h ? result : min_h;
 }
@@ -189,9 +189,9 @@ static size_t count_total_elems(const struct credits_data *data)
 
 struct credits_layout *credits_renderer_build(
 	const struct credits_data *data, uint32_t viewport_width,
-	const struct credits_style *style)
+	const char *fallback_font, int fallback_font_size)
 {
-	if (!data || data->num_sections == 0 || !style)
+	if (!data || data->num_sections == 0)
 		return NULL;
 
 	struct credits_layout *layout =
@@ -205,28 +205,8 @@ struct credits_layout *credits_renderer_build(
 	char name_buf[128];
 	float vw = (float)viewport_width;
 
-	const char *default_font = style->default_font ? style->default_font
-						       : "Arial";
-	int default_font_size = style->default_font_size > 0
-					? style->default_font_size
-					: 32;
-
-	/* Spacing: 0 = auto-calculate, any non-zero value used directly */
-	float auto_entry = calc_entry_gap(default_font_size);
-	float auto_section = calc_section_gap(default_font_size);
-
-	float heading_gap = style->heading_spacing != 0.0f
-				    ? style->heading_spacing
-				    : auto_entry * 2.0f;
-	float sub_gap = style->sub_spacing != 0.0f
-				? style->sub_spacing
-				: auto_entry;
-	float entry_gap = style->entry_spacing != 0.0f
-				  ? style->entry_spacing
-				  : auto_entry;
-	float section_gap = style->section_spacing != 0.0f
-				    ? style->section_spacing
-				    : auto_section;
+	const char *def_font = fallback_font ? fallback_font : "Arial";
+	int def_font_size = fallback_font_size > 0 ? fallback_font_size : 32;
 
 	for (size_t s = 0; s < data->num_sections; s++) {
 		const struct credits_section *section = &data->sections[s];
@@ -234,21 +214,43 @@ struct credits_layout *credits_renderer_build(
 		const char *section_align = section->alignment
 						    ? section->alignment
 						    : "center";
+		int section_align_id = align_from_string(section_align);
+
+		/* Per-section spacing: 0 = auto-calculate */
+		float auto_entry = calc_entry_gap(def_font_size);
+		float auto_section = calc_section_gap(def_font_size);
+
+		float heading_gap = section->heading_spacing != 0.0f
+					    ? section->heading_spacing
+					    : auto_entry * 2.0f;
+		float sub_gap = section->sub_spacing != 0.0f
+					? section->sub_spacing
+					: auto_entry;
+		float entry_gap = section->entry_spacing != 0.0f
+					  ? section->entry_spacing
+					  : auto_entry;
+		float section_gap = section->section_spacing != 0.0f
+					    ? section->section_spacing
+					    : auto_section;
+
+		/* Per-section outline/shadow */
+		bool ol_enabled = section->outline_enabled;
+		int ol_size = section->outline_size;
+		uint32_t ol_color = section->outline_color;
+
+		bool sh_enabled = section->shadow_enabled;
+		uint32_t sh_color = section->shadow_color;
+		float sh_off_x = section->shadow_offset_x;
+		float sh_off_y = section->shadow_offset_y;
 
 		/* --- Heading --- */
 		const char *h_font = section->heading_face
 					     ? section->heading_face
-					     : (section->heading_font
-							? section->heading_font
-							: default_font);
+					     : def_font;
 		int h_size = section->heading_size > 0
 				     ? section->heading_size
-				     : (section->heading_font_size > 0
-						? section->heading_font_size
-						: default_font_size);
-		uint32_t h_color = section->heading_color != 0
-					   ? section->heading_color
-					   : style->heading_color;
+				     : def_font_size;
+		uint32_t h_color = section->heading_color;
 		uint32_t h_flags = section->heading_flags;
 
 		const char *heading_text =
@@ -256,28 +258,25 @@ struct credits_layout *credits_renderer_build(
 
 		snprintf(name_buf, sizeof(name_buf), "credits_heading_%zu", s);
 
-		int section_align_id = align_from_string(section_align);
-
 		struct layout_elem *he = &layout->elems[elem_idx++];
 		he->type = ELEM_TEXT;
 		he->align = section_align_id;
 		he->text_source = make_text_source(
 			name_buf, heading_text, h_font, h_size, h_flags,
-			h_color, style->outline_enabled, style->outline_size,
-			style->outline_color);
+			h_color, ol_enabled, ol_size, ol_color);
 		he->height = text_source_height(he->text_source, h_size);
 		he->x = 0.0f;
 		he->y = y_cursor;
 
-		if (style->shadow_enabled) {
+		if (sh_enabled) {
 			char sname[128];
 			snprintf(sname, sizeof(sname),
 				 "credits_heading_%zu_sh", s);
 			he->shadow_source = make_text_source(
 				sname, heading_text, h_font, h_size,
-				h_flags, style->shadow_color, false, 0, 0);
-			he->shadow_off_x = style->shadow_offset_x;
-			he->shadow_off_y = style->shadow_offset_y;
+				h_flags, sh_color, false, 0, 0);
+			he->shadow_off_x = sh_off_x;
+			he->shadow_off_y = sh_off_y;
 		}
 
 		y_cursor += he->height + heading_gap;
@@ -306,44 +305,44 @@ struct credits_layout *credits_renderer_build(
 				entry_text = combined;
 				e_font = section->entry_face
 						 ? section->entry_face
-						 : default_font;
+						 : def_font;
 				e_size = section->entry_size > 0
 						 ? section->entry_size
-						 : default_font_size;
+						 : def_font_size;
 				e_flags = section->entry_flags;
-				e_color = style->text_color;
+				e_color = section->text_color;
 				break;
 			case CREDITS_ENTRY_NAME_ONLY:
 				entry_text = entry->name ? entry->name : "";
 				e_font = section->entry_face
 						 ? section->entry_face
-						 : default_font;
+						 : def_font;
 				e_size = section->entry_size > 0
 						 ? section->entry_size
-						 : default_font_size;
+						 : def_font_size;
 				e_flags = section->entry_flags;
-				e_color = style->text_color;
+				e_color = section->text_color;
 				break;
 			case CREDITS_ENTRY_TEXT:
 				entry_text = entry->text ? entry->text : "";
 				if (first_entry) {
 					e_font = section->sub_face
 							 ? section->sub_face
-							 : default_font;
+							 : def_font;
 					e_size = section->sub_size > 0
 							 ? section->sub_size
-							 : default_font_size;
+							 : def_font_size;
 					e_flags = section->sub_flags;
-					e_color = style->sub_color;
+					e_color = section->sub_color;
 				} else {
 					e_font = section->entry_face
 							 ? section->entry_face
-							 : default_font;
+							 : def_font;
 					e_size = section->entry_size > 0
 							 ? section->entry_size
-							 : default_font_size;
+							 : def_font_size;
 					e_flags = section->entry_flags;
-					e_color = style->text_color;
+					e_color = section->text_color;
 				}
 				break;
 			case CREDITS_ENTRY_IMAGE:
@@ -378,10 +377,10 @@ struct credits_layout *credits_renderer_build(
 				first_entry = false;
 				continue;
 			default:
-				e_font = default_font;
-				e_size = default_font_size;
+				e_font = def_font;
+				e_size = def_font_size;
 				e_flags = 0;
-				e_color = style->text_color;
+				e_color = section->text_color;
 				break;
 			}
 
@@ -393,23 +392,22 @@ struct credits_layout *credits_renderer_build(
 			le->text_source = make_text_source(
 				name_buf, entry_text, e_font,
 				e_size, e_flags,
-				e_color, style->outline_enabled,
-				style->outline_size, style->outline_color);
+				e_color, ol_enabled, ol_size, ol_color);
 			le->height = text_source_height(le->text_source,
 							e_size);
 			le->x = 0.0f;
 			le->y = y_cursor;
 
-			if (style->shadow_enabled) {
+			if (sh_enabled) {
 				char sname[128];
 				snprintf(sname, sizeof(sname),
 					 "credits_sh_%zu_%zu", s, e);
 				le->shadow_source = make_text_source(
 					sname, entry_text, e_font,
 					e_size, e_flags,
-					style->shadow_color, false, 0, 0);
-				le->shadow_off_x = style->shadow_offset_x;
-				le->shadow_off_y = style->shadow_offset_y;
+					sh_color, false, 0, 0);
+				le->shadow_off_x = sh_off_x;
+				le->shadow_off_y = sh_off_y;
 			}
 
 			/* Use sub_gap after subheading, entry_gap for everything else */

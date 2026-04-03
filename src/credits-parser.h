@@ -3,6 +3,7 @@
 #include <obs-data.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 enum credits_entry_type {
 	CREDITS_ENTRY_NAME_ROLE,
@@ -25,21 +26,40 @@ struct credits_entry {
 
 struct credits_section {
 	char *heading;
-	char *heading_font;
-	int heading_font_size;
-	uint32_t heading_color;
 	char *alignment;
 
-	/* Per-field font overrides (NULL/0 = use default) */
+	/* Per-field fonts (from font pickers) */
 	char *heading_face;
 	int heading_size;
-	uint32_t heading_flags; /* Bold=1, Italic=2, Underline=4, Strikeout=8 */
+	uint32_t heading_flags;
 	char *sub_face;
 	int sub_size;
 	uint32_t sub_flags;
 	char *entry_face;
 	int entry_size;
 	uint32_t entry_flags;
+
+	/* Per-section colors (RGB 0xRRGGBB) */
+	uint32_t heading_color;
+	uint32_t sub_color;
+	uint32_t text_color;
+
+	/* Per-section outline */
+	bool outline_enabled;
+	int outline_size;
+	uint32_t outline_color;
+
+	/* Per-section shadow */
+	bool shadow_enabled;
+	uint32_t shadow_color;
+	float shadow_offset_x;
+	float shadow_offset_y;
+
+	/* Per-section spacing */
+	float heading_spacing;  /* heading -> sub, 0=auto */
+	float sub_spacing;      /* sub -> entries, 0=auto */
+	float entry_spacing;    /* between entries, 0=auto */
+	float section_spacing;  /* gap after this section, 0=auto */
 
 	struct credits_entry *entries;
 	size_t num_entries;

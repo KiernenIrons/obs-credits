@@ -22,31 +22,11 @@ struct credits_source {
 	uint32_t height;
 	char *default_font_face;
 	int default_font_size;
-	uint32_t heading_color;
-	uint32_t sub_color;
-	uint32_t text_color;
-
-	/* Outline settings */
-	bool outline_enabled;
-	int outline_size;
-	uint32_t outline_color;
-
-	/* Shadow settings */
-	bool shadow_enabled;
-	uint32_t shadow_color;
-	float shadow_offset_x;
-	float shadow_offset_y;
 
 	/* Delay settings */
 	float start_delay;
 	float loop_delay;
 	float delay_timer;
-
-	/* Spacing settings */
-	float heading_spacing;
-	float sub_spacing;
-	float entry_spacing;
-	float section_spacing;
 
 	/* State */
 	struct credits_data *data;
@@ -122,6 +102,66 @@ settings_to_sections_array(obs_data_t *settings)
 			}
 		}
 
+		/* Per-section colors */
+		snprintf(key, sizeof(key), "section_%d_heading_color", i);
+		obs_data_set_int(sec, "heading_color",
+				 obs_data_get_int(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_sub_color", i);
+		obs_data_set_int(sec, "sub_color",
+				 obs_data_get_int(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_text_color", i);
+		obs_data_set_int(sec, "text_color",
+				 obs_data_get_int(settings, key));
+
+		/* Per-section outline */
+		snprintf(key, sizeof(key), "section_%d_outline_enabled", i);
+		obs_data_set_bool(sec, "outline_enabled",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_outline_size", i);
+		obs_data_set_int(sec, "outline_size",
+				 obs_data_get_int(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_outline_color", i);
+		obs_data_set_int(sec, "outline_color",
+				 obs_data_get_int(settings, key));
+
+		/* Per-section shadow */
+		snprintf(key, sizeof(key), "section_%d_shadow_enabled", i);
+		obs_data_set_bool(sec, "shadow_enabled",
+				  obs_data_get_bool(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_shadow_color", i);
+		obs_data_set_int(sec, "shadow_color",
+				 obs_data_get_int(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_shadow_offset_x", i);
+		obs_data_set_double(sec, "shadow_offset_x",
+				    obs_data_get_double(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_shadow_offset_y", i);
+		obs_data_set_double(sec, "shadow_offset_y",
+				    obs_data_get_double(settings, key));
+
+		/* Per-section spacing */
+		snprintf(key, sizeof(key), "section_%d_heading_spacing", i);
+		obs_data_set_double(sec, "heading_spacing",
+				    obs_data_get_double(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_sub_spacing", i);
+		obs_data_set_double(sec, "sub_spacing",
+				    obs_data_get_double(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_entry_spacing", i);
+		obs_data_set_double(sec, "entry_spacing",
+				    obs_data_get_double(settings, key));
+
+		snprintf(key, sizeof(key), "section_%d_section_spacing", i);
+		obs_data_set_double(sec, "section_spacing",
+				    obs_data_get_double(settings, key));
+
 		obs_data_array_push_back(arr, sec);
 		obs_data_release(sec);
 	}
@@ -133,11 +173,13 @@ settings_to_sections_array(obs_data_t *settings)
 static void shift_section_keys(obs_data_t *settings, int dst, int src)
 {
 	char sk[64], dk[64];
-	const char *fields[] = {"heading", "subheading", "names", "roles",
-				"alignment"};
+
+	/* String fields */
+	const char *str_fields[] = {"heading", "subheading", "names", "roles",
+				    "alignment"};
 	for (int f = 0; f < 5; f++) {
-		snprintf(sk, sizeof(sk), "section_%d_%s", src, fields[f]);
-		snprintf(dk, sizeof(dk), "section_%d_%s", dst, fields[f]);
+		snprintf(sk, sizeof(sk), "section_%d_%s", src, str_fields[f]);
+		snprintf(dk, sizeof(dk), "section_%d_%s", dst, str_fields[f]);
 		obs_data_set_string(settings, dk,
 				    obs_data_get_string(settings, sk));
 	}
@@ -154,6 +196,43 @@ static void shift_section_keys(obs_data_t *settings, int dst, int src)
 			obs_data_release(fobj);
 		}
 	}
+
+	/* Per-section color ints */
+	const char *int_fields[] = {"heading_color", "sub_color", "text_color",
+				    "outline_size", "outline_color",
+				    "shadow_color"};
+	for (int f = 0; f < 6; f++) {
+		snprintf(sk, sizeof(sk), "section_%d_%s", src, int_fields[f]);
+		snprintf(dk, sizeof(dk), "section_%d_%s", dst, int_fields[f]);
+		obs_data_set_int(settings, dk,
+				 obs_data_get_int(settings, sk));
+	}
+
+	/* Per-section bools */
+	const char *bool_fields[] = {"outline_enabled", "shadow_enabled"};
+	for (int f = 0; f < 2; f++) {
+		snprintf(sk, sizeof(sk), "section_%d_%s", src, bool_fields[f]);
+		snprintf(dk, sizeof(dk), "section_%d_%s", dst, bool_fields[f]);
+		obs_data_set_bool(settings, dk,
+				  obs_data_get_bool(settings, sk));
+	}
+
+	/* Per-section doubles (shadow offsets + spacing) */
+	const char *dbl_fields[] = {"shadow_offset_x", "shadow_offset_y",
+				    "heading_spacing", "sub_spacing",
+				    "entry_spacing", "section_spacing"};
+	for (int f = 0; f < 6; f++) {
+		snprintf(sk, sizeof(sk), "section_%d_%s", src, dbl_fields[f]);
+		snprintf(dk, sizeof(dk), "section_%d_%s", dst, dbl_fields[f]);
+		obs_data_set_double(settings, dk,
+				    obs_data_get_double(settings, sk));
+	}
+
+	/* Expand state */
+	snprintf(sk, sizeof(sk), "section_%d_expand", src);
+	snprintf(dk, sizeof(dk), "section_%d_expand", dst);
+	obs_data_set_bool(settings, dk,
+			  obs_data_get_bool(settings, sk));
 }
 
 /* ---- Section add/remove via visibility toggling ---- */
@@ -234,6 +313,39 @@ static bool on_add_section(obs_properties_t *props, obs_property_t *prop,
 		obs_data_set_obj(settings, key, fobj);
 		obs_data_release(fobj);
 	}
+
+	/* Set per-section styling defaults */
+	snprintf(key, sizeof(key), "section_%d_heading_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00FFD700);
+	snprintf(key, sizeof(key), "section_%d_sub_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00CCCCCC);
+	snprintf(key, sizeof(key), "section_%d_text_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00FFFFFF);
+
+	snprintf(key, sizeof(key), "section_%d_outline_enabled", new_idx);
+	obs_data_set_bool(settings, key, false);
+	snprintf(key, sizeof(key), "section_%d_outline_size", new_idx);
+	obs_data_set_int(settings, key, 2);
+	snprintf(key, sizeof(key), "section_%d_outline_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00000000);
+
+	snprintf(key, sizeof(key), "section_%d_shadow_enabled", new_idx);
+	obs_data_set_bool(settings, key, false);
+	snprintf(key, sizeof(key), "section_%d_shadow_color", new_idx);
+	obs_data_set_int(settings, key, (long long)0x00333333);
+	snprintf(key, sizeof(key), "section_%d_shadow_offset_x", new_idx);
+	obs_data_set_double(settings, key, 2.0);
+	snprintf(key, sizeof(key), "section_%d_shadow_offset_y", new_idx);
+	obs_data_set_double(settings, key, 2.0);
+
+	snprintf(key, sizeof(key), "section_%d_heading_spacing", new_idx);
+	obs_data_set_double(settings, key, 0.0);
+	snprintf(key, sizeof(key), "section_%d_sub_spacing", new_idx);
+	obs_data_set_double(settings, key, 0.0);
+	snprintf(key, sizeof(key), "section_%d_entry_spacing", new_idx);
+	obs_data_set_double(settings, key, 0.0);
+	snprintf(key, sizeof(key), "section_%d_section_spacing", new_idx);
+	obs_data_set_double(settings, key, 0.0);
 
 	/* Ensure the new section starts expanded */
 	snprintf(key, sizeof(key), "section_%d_expand", new_idx);
@@ -466,44 +578,95 @@ static bool on_section_expand_toggled(void *data, obs_properties_t *props,
 	char key[64];
 	const char *fields[] = {"heading", "heading_font", "subheading",
 				"sub_font", "names", "roles", "entry_font",
-				"alignment"};
-	for (int f = 0; f < 8; f++) {
+				"alignment",
+				"heading_color", "sub_color", "text_color",
+				"outline_enabled", "outline_size",
+				"outline_color",
+				"shadow_enabled", "shadow_color",
+				"shadow_offset_x", "shadow_offset_y",
+				"heading_spacing", "sub_spacing",
+				"entry_spacing", "section_spacing"};
+	for (int f = 0; f < 22; f++) {
 		snprintf(key, sizeof(key), "section_%d_%s", idx, fields[f]);
 		obs_property_t *p = obs_properties_get(props, key);
 		if (p)
 			obs_property_set_visible(p, expanded);
 	}
 
+	/* For outline/shadow sub-properties, respect their toggle state */
+	if (expanded) {
+		snprintf(key, sizeof(key), "section_%d_outline_enabled", idx);
+		bool ol_on = obs_data_get_bool(settings, key);
+		snprintf(key, sizeof(key), "section_%d_outline_size", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 expanded && ol_on);
+		snprintf(key, sizeof(key), "section_%d_outline_color", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 expanded && ol_on);
+
+		snprintf(key, sizeof(key), "section_%d_shadow_enabled", idx);
+		bool sh_on = obs_data_get_bool(settings, key);
+		snprintf(key, sizeof(key), "section_%d_shadow_color", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 expanded && sh_on);
+		snprintf(key, sizeof(key), "section_%d_shadow_offset_x", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 expanded && sh_on);
+		snprintf(key, sizeof(key), "section_%d_shadow_offset_y", idx);
+		obs_property_set_visible(obs_properties_get(props, key),
+					 expanded && sh_on);
+	}
+
 	return true;
 }
 
-/* ---- Outline/shadow visibility callbacks ---- */
+/* ---- Per-section outline/shadow visibility callbacks ---- */
 
-static bool on_outline_toggled(void *data, obs_properties_t *props,
-			       obs_property_t *prop, obs_data_t *settings)
+static bool on_section_outline_toggled(void *data, obs_properties_t *props,
+				       obs_property_t *prop,
+				       obs_data_t *settings)
 {
 	UNUSED_PARAMETER(data);
-	UNUSED_PARAMETER(prop);
-	bool enabled = obs_data_get_bool(settings, "outline_enabled");
-	obs_property_set_visible(obs_properties_get(props, "outline_size"),
-				 enabled);
-	obs_property_set_visible(obs_properties_get(props, "outline_color"),
-				 enabled);
+
+	/* Extract section index from property name: "section_N_outline_enabled" */
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "section_%d_outline_enabled", &idx) != 1)
+		return false;
+
+	bool enabled = obs_data_get_bool(settings, pname);
+	char key[64];
+
+	snprintf(key, sizeof(key), "section_%d_outline_size", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+	snprintf(key, sizeof(key), "section_%d_outline_color", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+
 	return true;
 }
 
-static bool on_shadow_toggled(void *data, obs_properties_t *props,
-			      obs_property_t *prop, obs_data_t *settings)
+static bool on_section_shadow_toggled(void *data, obs_properties_t *props,
+				      obs_property_t *prop,
+				      obs_data_t *settings)
 {
 	UNUSED_PARAMETER(data);
-	UNUSED_PARAMETER(prop);
-	bool enabled = obs_data_get_bool(settings, "shadow_enabled");
-	obs_property_set_visible(obs_properties_get(props, "shadow_color"),
-				 enabled);
-	obs_property_set_visible(obs_properties_get(props, "shadow_offset_x"),
-				 enabled);
-	obs_property_set_visible(obs_properties_get(props, "shadow_offset_y"),
-				 enabled);
+
+	/* Extract section index from property name: "section_N_shadow_enabled" */
+	const char *pname = obs_property_name(prop);
+	int idx = 0;
+	if (sscanf(pname, "section_%d_shadow_enabled", &idx) != 1)
+		return false;
+
+	bool enabled = obs_data_get_bool(settings, pname);
+	char key[64];
+
+	snprintf(key, sizeof(key), "section_%d_shadow_color", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+	snprintf(key, sizeof(key), "section_%d_shadow_offset_x", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+	snprintf(key, sizeof(key), "section_%d_shadow_offset_y", idx);
+	obs_property_set_visible(obs_properties_get(props, key), enabled);
+
 	return true;
 }
 
@@ -647,35 +810,8 @@ static void credits_update(void *data, obs_data_t *settings)
 		obs_data_release(font_obj);
 	}
 
-	/* Colors from obs_properties_add_color: 0x00BBGGRR format (no alpha).
-	 * We add alpha when passing to the renderer/text source. */
-	uint32_t hcolor =
-		(uint32_t)obs_data_get_int(settings, "heading_color");
-	uint32_t scolor =
-		(uint32_t)obs_data_get_int(settings, "sub_color");
-	uint32_t tcolor =
-		(uint32_t)obs_data_get_int(settings, "text_color");
-
-	bool outline_on = obs_data_get_bool(settings, "outline_enabled");
-	int outline_sz = (int)obs_data_get_int(settings, "outline_size");
-	uint32_t outline_col =
-		(uint32_t)obs_data_get_int(settings, "outline_color");
-
-	bool shadow_on = obs_data_get_bool(settings, "shadow_enabled");
-	uint32_t shadow_col =
-		(uint32_t)obs_data_get_int(settings, "shadow_color");
-	double shadow_ox =
-		obs_data_get_double(settings, "shadow_offset_x");
-	double shadow_oy =
-		obs_data_get_double(settings, "shadow_offset_y");
-
 	double start_del = obs_data_get_double(settings, "start_delay");
 	double loop_del = obs_data_get_double(settings, "loop_delay");
-
-	double heading_sp = obs_data_get_double(settings, "heading_spacing");
-	double sub_sp = obs_data_get_double(settings, "sub_spacing");
-	double entry_sp = obs_data_get_double(settings, "entry_spacing");
-	double section_sp = obs_data_get_double(settings, "section_spacing");
 
 	obs_data_array_t *arr = settings_to_sections_array(settings);
 
@@ -701,27 +837,9 @@ static void credits_update(void *data, obs_data_t *settings)
 	ctx->default_font_face = face ? face : bstrdup("Arial");
 	ctx->default_font_size = size > 0 ? size : 32;
 
-	ctx->heading_color = hcolor;
-	ctx->sub_color = scolor;
-	ctx->text_color = tcolor;
-
-	ctx->outline_enabled = outline_on;
-	ctx->outline_size = outline_sz;
-	ctx->outline_color = outline_col;
-
-	ctx->shadow_enabled = shadow_on;
-	ctx->shadow_color = shadow_col;
-	ctx->shadow_offset_x = (float)shadow_ox;
-	ctx->shadow_offset_y = (float)shadow_oy;
-
 	ctx->start_delay = (float)start_del;
 	ctx->loop_delay = (float)loop_del;
 	ctx->delay_timer = 0.0f;
-
-	ctx->heading_spacing = (float)heading_sp;
-	ctx->sub_spacing = (float)sub_sp;
-	ctx->entry_spacing = (float)entry_sp;
-	ctx->section_spacing = (float)section_sp;
 
 	/* Inject Discord sections if data is available */
 	if (obs_data_get_bool(settings, "discord_enabled")) {
@@ -751,6 +869,15 @@ static void credits_update(void *data, obs_data_t *settings)
 				obs_data_set_string(sec, "names",
 						    ctx->discord_boosters);
 				obs_data_set_string(sec, "alignment", "center");
+				/* Discord section default styling */
+				obs_data_set_int(sec, "heading_color",
+						 (long long)0x00FFD700);
+				obs_data_set_int(sec, "sub_color",
+						 (long long)0x00CCCCCC);
+				obs_data_set_int(sec, "text_color",
+						 (long long)0x0000FF00);
+				obs_data_set_bool(sec, "outline_enabled", false);
+				obs_data_set_bool(sec, "shadow_enabled", false);
 				obs_data_array_push_back(discord_arr, sec);
 				obs_data_release(sec);
 			}
@@ -770,6 +897,15 @@ static void credits_update(void *data, obs_data_t *settings)
 				obs_data_set_string(sec, "names",
 						    ctx->discord_roles[i]);
 				obs_data_set_string(sec, "alignment", "center");
+				/* Discord section default styling */
+				obs_data_set_int(sec, "heading_color",
+						 (long long)0x00FFD700);
+				obs_data_set_int(sec, "sub_color",
+						 (long long)0x00CCCCCC);
+				obs_data_set_int(sec, "text_color",
+						 (long long)0x0000FF00);
+				obs_data_set_bool(sec, "outline_enabled", false);
+				obs_data_set_bool(sec, "shadow_enabled", false);
 				obs_data_array_push_back(discord_arr, sec);
 				obs_data_release(sec);
 			}
@@ -802,28 +938,32 @@ static void credits_get_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, "width", 1920);
 	obs_data_set_default_int(settings, "height", 1080);
 
-	/* obs_properties_add_color uses RGB (0x00RRGGBB).
-	 * Gold (#FFD700), White (#FFFFFF) */
-	obs_data_set_default_int(settings, "heading_color",
-				 (long long)0x00FFD700);
-	obs_data_set_default_int(settings, "sub_color",
-				 (long long)0x00CCCCCC);
-	obs_data_set_default_int(settings, "text_color",
-				 (long long)0x00FFFFFF);
-
 	obs_data_set_default_int(settings, "section_count", 1);
 	obs_data_set_default_string(settings, "section_0_alignment", "center");
 
-	obs_data_set_default_bool(settings, "outline_enabled", false);
-	obs_data_set_default_int(settings, "outline_size", 2);
-	obs_data_set_default_int(settings, "outline_color",
+	/* Per-section defaults for section 0 */
+	obs_data_set_default_int(settings, "section_0_heading_color",
+				 (long long)0x00FFD700);
+	obs_data_set_default_int(settings, "section_0_sub_color",
+				 (long long)0x00CCCCCC);
+	obs_data_set_default_int(settings, "section_0_text_color",
+				 (long long)0x00FFFFFF);
+
+	obs_data_set_default_bool(settings, "section_0_outline_enabled", false);
+	obs_data_set_default_int(settings, "section_0_outline_size", 2);
+	obs_data_set_default_int(settings, "section_0_outline_color",
 				 (long long)0x00000000);
 
-	obs_data_set_default_bool(settings, "shadow_enabled", false);
-	obs_data_set_default_int(settings, "shadow_color",
+	obs_data_set_default_bool(settings, "section_0_shadow_enabled", false);
+	obs_data_set_default_int(settings, "section_0_shadow_color",
 				 (long long)0x00333333);
-	obs_data_set_default_double(settings, "shadow_offset_x", 2.0);
-	obs_data_set_default_double(settings, "shadow_offset_y", 2.0);
+	obs_data_set_default_double(settings, "section_0_shadow_offset_x", 2.0);
+	obs_data_set_default_double(settings, "section_0_shadow_offset_y", 2.0);
+
+	obs_data_set_default_double(settings, "section_0_heading_spacing", 0.0);
+	obs_data_set_default_double(settings, "section_0_sub_spacing", 0.0);
+	obs_data_set_default_double(settings, "section_0_entry_spacing", 0.0);
+	obs_data_set_default_double(settings, "section_0_section_spacing", 0.0);
 
 	obs_data_set_default_double(settings, "start_delay", 0.0);
 	obs_data_set_default_double(settings, "loop_delay", 0.0);
@@ -833,11 +973,6 @@ static void credits_get_defaults(obs_data_t *settings)
 				    "Server Boosters");
 	obs_data_set_default_string(settings, "discord_role_0_heading",
 				    "Moderators");
-
-	obs_data_set_default_double(settings, "heading_spacing", 0.0);
-	obs_data_set_default_double(settings, "sub_spacing", 0.0);
-	obs_data_set_default_double(settings, "entry_spacing", 0.0);
-	obs_data_set_default_double(settings, "section_spacing", 0.0);
 
 	/* Default all sections to expanded */
 	for (int i = 0; i < MAX_SECTIONS; i++) {
@@ -873,26 +1008,9 @@ static void credits_video_tick(void *data, float seconds)
 	pthread_mutex_lock(&ctx->mutex);
 
 	if (ctx->data && !ctx->layout) {
-		struct credits_style style;
-		style.default_font = ctx->default_font_face;
-		style.default_font_size = ctx->default_font_size;
-		style.heading_color = ctx->heading_color;
-		style.sub_color = ctx->sub_color;
-		style.text_color = ctx->text_color;
-		style.outline_enabled = ctx->outline_enabled;
-		style.outline_size = ctx->outline_size;
-		style.outline_color = ctx->outline_color;
-		style.shadow_enabled = ctx->shadow_enabled;
-		style.shadow_color = ctx->shadow_color;
-		style.shadow_offset_x = ctx->shadow_offset_x;
-		style.shadow_offset_y = ctx->shadow_offset_y;
-		style.heading_spacing = ctx->heading_spacing;
-		style.sub_spacing = ctx->sub_spacing;
-		style.entry_spacing = ctx->entry_spacing;
-		style.section_spacing = ctx->section_spacing;
-
-		ctx->layout = credits_renderer_build(ctx->data, ctx->width,
-						     &style);
+		ctx->layout = credits_renderer_build(
+			ctx->data, ctx->width,
+			ctx->default_font_face, ctx->default_font_size);
 		if (ctx->layout)
 			ctx->total_height =
 				credits_renderer_total_height(ctx->layout);
@@ -1036,6 +1154,11 @@ static obs_properties_t *credits_get_properties(void *data)
 		char names_name[64], roles_name[64], align_name[64];
 		char remove_name[64], label[64];
 		char hfont_name[64], sfont_name[64], efont_name[64];
+		char hcolor_name[64], scolor_name[64], tcolor_name[64];
+		char ol_en_name[64], ol_sz_name[64], ol_col_name[64];
+		char sh_en_name[64], sh_col_name[64];
+		char sh_ox_name[64], sh_oy_name[64];
+		char hsp_name[64], ssp_name[64], esp_name[64], secsp_name[64];
 
 		snprintf(group_name, sizeof(group_name), "section_%d_group",
 			 i);
@@ -1059,6 +1182,39 @@ static obs_properties_t *credits_get_properties(void *data)
 			 "section_%d_alignment", i);
 		snprintf(remove_name, sizeof(remove_name),
 			 "section_%d_remove", i);
+
+		snprintf(hcolor_name, sizeof(hcolor_name),
+			 "section_%d_heading_color", i);
+		snprintf(scolor_name, sizeof(scolor_name),
+			 "section_%d_sub_color", i);
+		snprintf(tcolor_name, sizeof(tcolor_name),
+			 "section_%d_text_color", i);
+
+		snprintf(ol_en_name, sizeof(ol_en_name),
+			 "section_%d_outline_enabled", i);
+		snprintf(ol_sz_name, sizeof(ol_sz_name),
+			 "section_%d_outline_size", i);
+		snprintf(ol_col_name, sizeof(ol_col_name),
+			 "section_%d_outline_color", i);
+
+		snprintf(sh_en_name, sizeof(sh_en_name),
+			 "section_%d_shadow_enabled", i);
+		snprintf(sh_col_name, sizeof(sh_col_name),
+			 "section_%d_shadow_color", i);
+		snprintf(sh_ox_name, sizeof(sh_ox_name),
+			 "section_%d_shadow_offset_x", i);
+		snprintf(sh_oy_name, sizeof(sh_oy_name),
+			 "section_%d_shadow_offset_y", i);
+
+		snprintf(hsp_name, sizeof(hsp_name),
+			 "section_%d_heading_spacing", i);
+		snprintf(ssp_name, sizeof(ssp_name),
+			 "section_%d_sub_spacing", i);
+		snprintf(esp_name, sizeof(esp_name),
+			 "section_%d_entry_spacing", i);
+		snprintf(secsp_name, sizeof(secsp_name),
+			 "section_%d_section_spacing", i);
+
 		snprintf(label, sizeof(label), "%s %d",
 			 obs_module_text("Section"), i + 1);
 
@@ -1103,6 +1259,55 @@ static obs_properties_t *credits_get_properties(void *data)
 		obs_property_list_add_string(
 			align_prop, obs_module_text("AlignRight"), "right");
 
+		/* Per-section colors */
+		obs_properties_add_color(group, hcolor_name,
+					 obs_module_text("SectionHeadingColor"));
+		obs_properties_add_color(group, scolor_name,
+					 obs_module_text("SectionSubColor"));
+		obs_properties_add_color(group, tcolor_name,
+					 obs_module_text("SectionTextColor"));
+
+		/* Per-section outline */
+		obs_property_t *ol_cb = obs_properties_add_bool(
+			group, ol_en_name,
+			obs_module_text("SectionOutlineEnabled"));
+		obs_property_set_modified_callback2(
+			ol_cb, on_section_outline_toggled, ctx);
+		obs_properties_add_int(group, ol_sz_name,
+				       obs_module_text("SectionOutlineSize"),
+				       1, 20, 1);
+		obs_properties_add_color(group, ol_col_name,
+					 obs_module_text("SectionOutlineColor"));
+
+		/* Per-section shadow */
+		obs_property_t *sh_cb = obs_properties_add_bool(
+			group, sh_en_name,
+			obs_module_text("SectionShadowEnabled"));
+		obs_property_set_modified_callback2(
+			sh_cb, on_section_shadow_toggled, ctx);
+		obs_properties_add_color(group, sh_col_name,
+					 obs_module_text("SectionShadowColor"));
+		obs_properties_add_float(group, sh_ox_name,
+					 obs_module_text("SectionShadowOffsetX"),
+					 -20.0, 20.0, 0.5);
+		obs_properties_add_float(group, sh_oy_name,
+					 obs_module_text("SectionShadowOffsetY"),
+					 -20.0, 20.0, 0.5);
+
+		/* Per-section spacing */
+		obs_properties_add_float(group, hsp_name,
+					 obs_module_text("SectionHeadingSpacing"),
+					 -9999.0, 9999.0, 1.0);
+		obs_properties_add_float(group, ssp_name,
+					 obs_module_text("SectionSubSpacing"),
+					 -9999.0, 9999.0, 1.0);
+		obs_properties_add_float(group, esp_name,
+					 obs_module_text("SectionEntrySpacing"),
+					 -9999.0, 9999.0, 1.0);
+		obs_properties_add_float(group, secsp_name,
+					 obs_module_text("SectionSectionSpacing"),
+					 -9999.0, 9999.0, 1.0);
+
 		/* Remove button */
 		obs_property_t *rm = obs_properties_add_button2(
 			group, remove_name,
@@ -1128,6 +1333,45 @@ static obs_properties_t *credits_get_properties(void *data)
 			obs_properties_get(group, efont_name), expanded);
 		obs_property_set_visible(
 			obs_properties_get(group, align_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, hcolor_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, scolor_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, tcolor_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, ol_en_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_en_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, hsp_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, ssp_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, esp_name), expanded);
+		obs_property_set_visible(
+			obs_properties_get(group, secsp_name), expanded);
+
+		/* Outline sub-properties: visible only if expanded AND outline enabled */
+		bool ol_on = obs_data_get_bool(settings, ol_en_name);
+		obs_property_set_visible(
+			obs_properties_get(group, ol_sz_name),
+			expanded && ol_on);
+		obs_property_set_visible(
+			obs_properties_get(group, ol_col_name),
+			expanded && ol_on);
+
+		/* Shadow sub-properties: visible only if expanded AND shadow enabled */
+		bool sh_on = obs_data_get_bool(settings, sh_en_name);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_col_name),
+			expanded && sh_on);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_ox_name),
+			expanded && sh_on);
+		obs_property_set_visible(
+			obs_properties_get(group, sh_oy_name),
+			expanded && sh_on);
 
 		obs_property_t *gp = obs_properties_add_group(
 			props, group_name, label, OBS_GROUP_NORMAL, group);
@@ -1137,23 +1381,6 @@ static obs_properties_t *credits_get_properties(void *data)
 	obs_properties_add_button2(props, "add_section",
 				   obs_module_text("AddSection"),
 				   on_add_section, ctx);
-
-	/* Global spacing controls */
-	obs_properties_add_float(props, "heading_spacing",
-				 obs_module_text("HeadingSpacing"), -9999.0,
-				 9999.0, 1.0);
-
-	obs_properties_add_float(props, "sub_spacing",
-				 obs_module_text("SubSpacing"), -9999.0,
-				 9999.0, 1.0);
-
-	obs_properties_add_float(props, "entry_spacing",
-				 obs_module_text("EntrySpacing"), -9999.0,
-				 9999.0, 1.0);
-
-	obs_properties_add_float(props, "section_spacing",
-				 obs_module_text("SectionSpacing"), -9999.0,
-				 9999.0, 1.0);
 
 	/* General settings */
 	obs_properties_add_float(props, "scroll_speed",
@@ -1168,51 +1395,8 @@ static obs_properties_t *credits_get_properties(void *data)
 	obs_properties_add_int(props, "height", obs_module_text("Height"), 480,
 			       2160, 1);
 
-	obs_properties_add_color(props, "heading_color",
-				 obs_module_text("HeadingColor"));
-
-	obs_properties_add_color(props, "sub_color",
-				 obs_module_text("SubColor"));
-
-	obs_properties_add_color(props, "text_color",
-				 obs_module_text("TextColor"));
-
-	/* Outline - checkbox with show/hide for sub-options */
-	obs_property_t *outline_cb = obs_properties_add_bool(
-		props, "outline_enabled",
-		obs_module_text("OutlineEnabled"));
-	obs_property_set_modified_callback2(outline_cb, on_outline_toggled,
-					    ctx);
-
-	obs_property_t *ol_size = obs_properties_add_int(
-		props, "outline_size", obs_module_text("OutlineSize"), 1, 20,
-		1);
-	obs_property_t *ol_color = obs_properties_add_color(
-		props, "outline_color", obs_module_text("OutlineColor"));
-
-	bool ol_on = obs_data_get_bool(settings, "outline_enabled");
-	obs_property_set_visible(ol_size, ol_on);
-	obs_property_set_visible(ol_color, ol_on);
-
-	/* Shadow - checkbox with show/hide for sub-options */
-	obs_property_t *shadow_cb = obs_properties_add_bool(
-		props, "shadow_enabled",
-		obs_module_text("ShadowEnabled"));
-	obs_property_set_modified_callback2(shadow_cb, on_shadow_toggled, ctx);
-
-	obs_property_t *sh_color = obs_properties_add_color(
-		props, "shadow_color", obs_module_text("ShadowColor"));
-	obs_property_t *sh_ox = obs_properties_add_float(
-		props, "shadow_offset_x", obs_module_text("ShadowOffsetX"),
-		-20.0, 20.0, 0.5);
-	obs_property_t *sh_oy = obs_properties_add_float(
-		props, "shadow_offset_y", obs_module_text("ShadowOffsetY"),
-		-20.0, 20.0, 0.5);
-
-	bool sh_on = obs_data_get_bool(settings, "shadow_enabled");
-	obs_property_set_visible(sh_color, sh_on);
-	obs_property_set_visible(sh_ox, sh_on);
-	obs_property_set_visible(sh_oy, sh_on);
+	obs_properties_add_font(props, "font",
+				obs_module_text("DefaultFont"));
 
 	/* Delay settings */
 	obs_properties_add_float(props, "start_delay",

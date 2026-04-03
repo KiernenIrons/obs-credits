@@ -113,26 +113,6 @@ static void parse_section(const cJSON *json, struct credits_section *section)
 	if (cJSON_IsString(align_item))
 		section->alignment = bstrdup(align_item->valuestring);
 
-	const cJSON *style = cJSON_GetObjectItem(json, "heading_style");
-	if (cJSON_IsObject(style)) {
-		const cJSON *font_item = cJSON_GetObjectItem(style, "font");
-		if (cJSON_IsString(font_item))
-			section->heading_font =
-				bstrdup(font_item->valuestring);
-
-		const cJSON *size_item = cJSON_GetObjectItem(style, "size");
-		if (cJSON_IsNumber(size_item))
-			section->heading_font_size = size_item->valueint;
-
-		const cJSON *color_item =
-			cJSON_GetObjectItem(style, "color");
-		if (cJSON_IsString(color_item) &&
-		    color_item->valuestring[0] == '#') {
-			section->heading_color = (uint32_t)strtoul(
-				color_item->valuestring + 1, NULL, 16);
-		}
-	}
-
 	/* Parse per-field font flags from JSON */
 	section->heading_flags = parse_font_flags_json(
 		json, "heading_bold", "heading_italic", "heading_underline");
@@ -153,6 +133,19 @@ static void parse_section(const cJSON *json, struct credits_section *section)
 	const cJSON *es = cJSON_GetObjectItem(json, "entry_size");
 	if (cJSON_IsNumber(es))
 		section->entry_size = es->valueint;
+
+	/* Parse per-section colors */
+	const cJSON *hc = cJSON_GetObjectItem(json, "heading_color");
+	if (cJSON_IsNumber(hc))
+		section->heading_color = (uint32_t)hc->valueint;
+
+	const cJSON *sc = cJSON_GetObjectItem(json, "sub_color");
+	if (cJSON_IsNumber(sc))
+		section->sub_color = (uint32_t)sc->valueint;
+
+	const cJSON *tc = cJSON_GetObjectItem(json, "text_color");
+	if (cJSON_IsNumber(tc))
+		section->text_color = (uint32_t)tc->valueint;
 
 	const cJSON *entries_arr = cJSON_GetObjectItem(json, "entries");
 	if (cJSON_IsArray(entries_arr)) {
@@ -279,21 +272,6 @@ static char *get_line(const char *text, size_t line_idx)
 	return line;
 }
 
-static uint32_t build_flags_from_bools(obs_data_t *sec,
-					const char *bold_key,
-					const char *italic_key,
-					const char *underline_key)
-{
-	uint32_t flags = 0;
-	if (obs_data_get_bool(sec, bold_key))
-		flags |= 1;
-	if (obs_data_get_bool(sec, italic_key))
-		flags |= 2;
-	if (obs_data_get_bool(sec, underline_key))
-		flags |= 4;
-	return flags;
-}
-
 struct credits_data *credits_build_from_settings(obs_data_t *settings)
 {
 	if (!settings)
@@ -359,6 +337,42 @@ struct credits_data *credits_build_from_settings(obs_data_t *settings)
 				obs_data_release(fobj);
 			}
 		}
+
+		/* Read per-section colors */
+		section->heading_color =
+			(uint32_t)obs_data_get_int(sec, "heading_color");
+		section->sub_color =
+			(uint32_t)obs_data_get_int(sec, "sub_color");
+		section->text_color =
+			(uint32_t)obs_data_get_int(sec, "text_color");
+
+		/* Read per-section outline */
+		section->outline_enabled =
+			obs_data_get_bool(sec, "outline_enabled");
+		section->outline_size =
+			(int)obs_data_get_int(sec, "outline_size");
+		section->outline_color =
+			(uint32_t)obs_data_get_int(sec, "outline_color");
+
+		/* Read per-section shadow */
+		section->shadow_enabled =
+			obs_data_get_bool(sec, "shadow_enabled");
+		section->shadow_color =
+			(uint32_t)obs_data_get_int(sec, "shadow_color");
+		section->shadow_offset_x =
+			(float)obs_data_get_double(sec, "shadow_offset_x");
+		section->shadow_offset_y =
+			(float)obs_data_get_double(sec, "shadow_offset_y");
+
+		/* Read per-section spacing */
+		section->heading_spacing =
+			(float)obs_data_get_double(sec, "heading_spacing");
+		section->sub_spacing =
+			(float)obs_data_get_double(sec, "sub_spacing");
+		section->entry_spacing =
+			(float)obs_data_get_double(sec, "entry_spacing");
+		section->section_spacing =
+			(float)obs_data_get_double(sec, "section_spacing");
 
 		/* Count entries: subheading (if present) + name/role lines */
 		size_t name_lines = count_lines(names);
@@ -436,7 +450,6 @@ void credits_data_free(struct credits_data *data)
 
 		bfree(section->entries);
 		bfree(section->heading);
-		bfree(section->heading_font);
 		bfree(section->alignment);
 		bfree(section->heading_face);
 		bfree(section->sub_face);
