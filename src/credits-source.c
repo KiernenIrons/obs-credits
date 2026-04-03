@@ -35,10 +35,6 @@ struct credits_source {
 	struct credits_layout *layout;
 	gs_texrender_t *texrender;
 	bool needs_rebuild;
-	gs_texrender_t *texrender_back; /* backup texrender for seamless swap */
-	bool swap_pending;   /* true while new layout warms up */
-	int warmup_frames;
-	struct credits_layout *pending_free;
 	float scroll_offset;
 	float current_speed;
 	float total_height;
@@ -1450,13 +1446,10 @@ static void credits_destroy(void *data)
 	pthread_mutex_unlock(&ctx->mutex);
 
 	credits_renderer_free(old_layout);
-	credits_renderer_free(ctx->pending_free);
-	ctx->pending_free = NULL;
 	credits_data_free(cdata);
 
 	obs_enter_graphics();
 	gs_texrender_destroy(ctx->texrender);
-	gs_texrender_destroy(ctx->texrender_back);
 	obs_leave_graphics();
 
 	obs_hotkey_unregister(ctx->hotkey_start);
@@ -1955,27 +1948,16 @@ static void credits_video_tick(void *data, float seconds)
 
 	pthread_mutex_lock(&ctx->mutex);
 
-	/* Free any layout deferred from previous tick */
-	if (ctx->pending_free) {
-		credits_renderer_free(ctx->pending_free);
-		ctx->pending_free = NULL;
-	}
-
-	/* Rebuild layout when settings changed or no layout exists yet */
 	if (ctx->data && (ctx->needs_rebuild || !ctx->layout)) {
-		struct credits_layout *new_layout =
-			credits_renderer_build(
-				ctx->data, ctx->width,
-				ctx->default_font_face,
-				ctx->default_font_size);
-		if (new_layout) {
-			if (ctx->pending_free)
-				credits_renderer_free(ctx->pending_free);
-			ctx->pending_free = ctx->layout;
-			ctx->layout = new_layout;
-			ctx->swap_pending = true;
-			ctx->warmup_frames = 0;
-		}
+		struct credits_layout *old = ctx->layout;
+		ctx->layout = credits_renderer_build(
+			ctx->data, ctx->width,
+			ctx->default_font_face,
+			ctx->default_font_size);
+		if (ctx->layout)
+			ctx->total_height =
+				credits_renderer_total_height(ctx->layout);
+		credits_renderer_free(old);
 		ctx->needs_rebuild = false;
 	}
 
@@ -2042,7 +2024,7 @@ static void credits_video_tick(void *data, float seconds)
 	/* Poll YouTube chat count every ~2 seconds.
 	 * Must NOT hold the mutex when calling obs_source_update. */
 	ctx->yt_poll_timer += seconds;
-	if (ctx->yt_poll_timer >= 6.0f) {
+	if (ctx->yt_poll_timer >= 15.0f) {
 		ctx->yt_poll_timer = 0.0f;
 
 		pthread_mutex_lock(&ctx->mutex);
@@ -2084,77 +2066,34 @@ static void credits_video_render(void *data, gs_effect_t *effect)
 
 	if (!ctx->texrender)
 		ctx->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
-	if (!ctx->texrender_back)
-		ctx->texrender_back = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 
-	if (ctx->swap_pending) {
-		/* Render new layout to BACKUP texrender while main keeps
-		 * displaying the old frame. After 4 frames of warmup,
-		 * swap the texrenders so the new one becomes primary. */
-		gs_texrender_reset(ctx->texrender_back);
-		if (gs_texrender_begin(ctx->texrender_back, ctx->width,
-				       ctx->height)) {
-			struct vec4 cc;
-			vec4_zero(&cc);
-			gs_clear(GS_CLEAR_COLOR, &cc, 0.0f, 0);
-			gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
-				 ctx->scroll_offset + (float)ctx->height,
-				 -1.0f, 1.0f);
-			credits_renderer_draw(ctx->layout, ctx->width,
-					      ctx->scroll_offset,
-					      (float)ctx->height);
-			gs_texrender_end(ctx->texrender_back);
-		}
+	gs_texrender_reset(ctx->texrender);
 
-		ctx->warmup_frames++;
-		if (ctx->warmup_frames >= 4) {
-			/* Swap: backup becomes primary */
-			gs_texrender_t *tmp = ctx->texrender;
-			ctx->texrender = ctx->texrender_back;
-			ctx->texrender_back = tmp;
-			ctx->swap_pending = false;
-		}
+	if (gs_texrender_begin(ctx->texrender, ctx->width, ctx->height)) {
+		struct vec4 clear_color;
+		vec4_zero(&clear_color);
+		gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
 
-		/* Display the OLD (main) texrender during warmup */
-		gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
-		if (tex) {
-			gs_effect_t *def =
-				obs_get_base_effect(OBS_EFFECT_DEFAULT);
-			gs_eparam_t *param =
-				gs_effect_get_param_by_name(def, "image");
-			gs_effect_set_texture(param, tex);
-			while (gs_effect_loop(def, "Draw"))
-				gs_draw_sprite(tex, 0, ctx->width,
-					       ctx->height);
-		}
-	} else {
-		/* Normal rendering: render layout to primary texrender */
-		gs_texrender_reset(ctx->texrender);
-		if (gs_texrender_begin(ctx->texrender, ctx->width,
-				       ctx->height)) {
-			struct vec4 cc;
-			vec4_zero(&cc);
-			gs_clear(GS_CLEAR_COLOR, &cc, 0.0f, 0);
-			gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
-				 ctx->scroll_offset + (float)ctx->height,
-				 -1.0f, 1.0f);
-			credits_renderer_draw(ctx->layout, ctx->width,
-					      ctx->scroll_offset,
-					      (float)ctx->height);
-			gs_texrender_end(ctx->texrender);
-		}
+		gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
+			 ctx->scroll_offset + (float)ctx->height, -1.0f,
+			 1.0f);
 
-		gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
-		if (tex) {
-			gs_effect_t *def =
-				obs_get_base_effect(OBS_EFFECT_DEFAULT);
-			gs_eparam_t *param =
-				gs_effect_get_param_by_name(def, "image");
-			gs_effect_set_texture(param, tex);
-			while (gs_effect_loop(def, "Draw"))
-				gs_draw_sprite(tex, 0, ctx->width,
-					       ctx->height);
-		}
+		credits_renderer_draw(ctx->layout, ctx->width,
+				      ctx->scroll_offset,
+				      (float)ctx->height);
+
+		gs_texrender_end(ctx->texrender);
+	}
+
+	gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
+	if (tex) {
+		gs_effect_t *def = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+		gs_eparam_t *param =
+			gs_effect_get_param_by_name(def, "image");
+		gs_effect_set_texture(param, tex);
+
+		while (gs_effect_loop(def, "Draw"))
+			gs_draw_sprite(tex, 0, ctx->width, ctx->height);
 	}
 
 	pthread_mutex_unlock(&ctx->mutex);
