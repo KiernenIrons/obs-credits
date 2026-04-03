@@ -120,7 +120,9 @@ static obs_source_t *make_text_source(const char *name, const char *text,
 static float text_source_height(obs_source_t *source, int font_size)
 {
 	uint32_t h = obs_source_get_height(source);
-	return h > 0 ? (float)h : (float)font_size * 1.5f;
+	float min_h = (float)font_size * 1.2f;
+	float result = h > 0 ? (float)h : (float)font_size * 1.5f;
+	return result > min_h ? result : min_h;
 }
 
 static float text_source_width(obs_source_t *source, int font_size,
