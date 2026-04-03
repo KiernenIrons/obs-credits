@@ -33,6 +33,7 @@ struct credits_source {
 	/* State */
 	struct credits_data *data;
 	struct credits_layout *layout;
+	struct credits_layout *old_layout; /* freed next tick */
 	gs_texrender_t *texrender;
 	bool needs_rebuild;
 	float scroll_offset;
@@ -1446,6 +1447,8 @@ static void credits_destroy(void *data)
 	pthread_mutex_unlock(&ctx->mutex);
 
 	credits_renderer_free(old_layout);
+	credits_renderer_free(ctx->old_layout);
+	ctx->old_layout = NULL;
 	credits_data_free(cdata);
 
 	obs_enter_graphics();
@@ -1948,8 +1951,15 @@ static void credits_video_tick(void *data, float seconds)
 
 	pthread_mutex_lock(&ctx->mutex);
 
+	/* Free layout from previous rebuild (deferred so it's not freed
+	 * during the same tick it was replaced - avoids graphics issues) */
+	if (ctx->old_layout) {
+		credits_renderer_free(ctx->old_layout);
+		ctx->old_layout = NULL;
+	}
+
 	if (ctx->data && (ctx->needs_rebuild || !ctx->layout)) {
-		struct credits_layout *old = ctx->layout;
+		ctx->old_layout = ctx->layout;
 		ctx->layout = credits_renderer_build(
 			ctx->data, ctx->width,
 			ctx->default_font_face,
@@ -1957,7 +1967,6 @@ static void credits_video_tick(void *data, float seconds)
 		if (ctx->layout)
 			ctx->total_height =
 				credits_renderer_total_height(ctx->layout);
-		credits_renderer_free(old);
 		ctx->needs_rebuild = false;
 	}
 
