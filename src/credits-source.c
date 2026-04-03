@@ -30,11 +30,17 @@ struct credits_source {
 	float loop_delay;
 	float delay_timer;
 
-	/* State */
+	/* State - two layers for flicker-free updates.
+	 * Both render every frame. display_layer picks which is shown.
+	 * On rebuild, the non-displayed layer gets the new layout.
+	 * After 3 frames, display_layer swaps. */
 	struct credits_data *data;
-	struct credits_layout *layout;
-	struct credits_layout *old_layout; /* freed next tick */
-	gs_texrender_t *texrender;
+	struct {
+		struct credits_layout *layout;
+		gs_texrender_t *texrender;
+	} layer[2];
+	int display_layer;  /* 0 or 1: which layer is shown */
+	int rebuild_warmup; /* counts up after rebuild, swaps at 3 */
 	bool needs_rebuild;
 	float scroll_offset;
 	float current_speed;
@@ -1359,6 +1365,7 @@ static void credits_hotkey_start(void *data, obs_hotkey_id id,
 	ctx->paused = false;
 	ctx->waiting_loop = false;
 	ctx->needs_rebuild = true;
+	ctx->rebuild_warmup = -1;
 	pthread_mutex_unlock(&ctx->mutex);
 }
 
@@ -1409,6 +1416,8 @@ static void *credits_create(obs_data_t *settings, obs_source_t *source)
 	struct credits_source *ctx = bzalloc(sizeof(struct credits_source));
 	ctx->self = source;
 	pthread_mutex_init(&ctx->mutex, NULL);
+	ctx->display_layer = 0;
+	ctx->rebuild_warmup = -1;
 
 	ctx->hotkey_start = obs_hotkey_register_source(
 		source, "obs_credits.start",
@@ -1440,19 +1449,21 @@ static void credits_destroy(void *data)
 	struct credits_source *ctx = data;
 
 	pthread_mutex_lock(&ctx->mutex);
-	struct credits_layout *old_layout = ctx->layout;
+	struct credits_layout *l0 = ctx->layer[0].layout;
+	struct credits_layout *l1 = ctx->layer[1].layout;
+	ctx->layer[0].layout = NULL;
+	ctx->layer[1].layout = NULL;
 	struct credits_data *cdata = ctx->data;
-	ctx->layout = NULL;
 	ctx->data = NULL;
 	pthread_mutex_unlock(&ctx->mutex);
 
-	credits_renderer_free(old_layout);
-	credits_renderer_free(ctx->old_layout);
-	ctx->old_layout = NULL;
+	credits_renderer_free(l0);
+	credits_renderer_free(l1);
 	credits_data_free(cdata);
 
 	obs_enter_graphics();
-	gs_texrender_destroy(ctx->texrender);
+	gs_texrender_destroy(ctx->layer[0].texrender);
+	gs_texrender_destroy(ctx->layer[1].texrender);
 	obs_leave_graphics();
 
 	obs_hotkey_unregister(ctx->hotkey_start);
@@ -1951,30 +1962,35 @@ static void credits_video_tick(void *data, float seconds)
 
 	pthread_mutex_lock(&ctx->mutex);
 
-	/* Free layout from previous rebuild (deferred so it's not freed
-	 * during the same tick it was replaced - avoids graphics issues) */
-	if (ctx->old_layout) {
-		credits_renderer_free(ctx->old_layout);
-		ctx->old_layout = NULL;
-	}
-
-	if (ctx->data && (ctx->needs_rebuild || !ctx->layout)) {
-		ctx->old_layout = ctx->layout;
-		ctx->layout = credits_renderer_build(
+	if (ctx->data && (ctx->needs_rebuild || !ctx->layer[ctx->display_layer].layout)) {
+		/* Build into the NON-displayed layer */
+		int target = 1 - ctx->display_layer;
+		credits_renderer_free(ctx->layer[target].layout);
+		ctx->layer[target].layout = credits_renderer_build(
 			ctx->data, ctx->width,
 			ctx->default_font_face,
 			ctx->default_font_size);
-		if (ctx->layout)
-			ctx->total_height =
-				credits_renderer_total_height(ctx->layout);
+		ctx->rebuild_warmup = 0;
 		ctx->needs_rebuild = false;
 	}
 
-	/* Update total_height from the current layout */
-	if (ctx->layout)
-		ctx->total_height = credits_renderer_total_height(ctx->layout);
+	/* Count warmup frames and swap when ready */
+	if (ctx->rebuild_warmup >= 0 && ctx->rebuild_warmup < 3) {
+		ctx->rebuild_warmup++;
+		if (ctx->rebuild_warmup >= 3) {
+			int target = 1 - ctx->display_layer;
+			if (ctx->layer[target].layout) {
+				ctx->display_layer = target;
+			}
+		}
+	}
 
-	if (ctx->scrolling && ctx->layout) {
+	/* Update total_height from the current layout */
+	if (ctx->layer[ctx->display_layer].layout)
+		ctx->total_height = credits_renderer_total_height(
+			ctx->layer[ctx->display_layer].layout);
+
+	if (ctx->scrolling && ctx->layer[ctx->display_layer].layout) {
 		if (!ctx->started) {
 			ctx->scroll_offset = -(float)ctx->height;
 			ctx->delay_timer = 0.0f;
@@ -2073,40 +2089,38 @@ static void credits_video_render(void *data, gs_effect_t *effect)
 
 	pthread_mutex_lock(&ctx->mutex);
 
-	if (!ctx->layout || ctx->width == 0 || ctx->height == 0) {
+	if (!ctx->layer[ctx->display_layer].layout || ctx->width == 0 || ctx->height == 0) {
 		pthread_mutex_unlock(&ctx->mutex);
 		UNUSED_PARAMETER(effect);
 		return;
 	}
 
-	if (!ctx->texrender)
-		ctx->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	/* Render BOTH layers so text sources in both stay initialized */
+	for (int i = 0; i < 2; i++) {
+		if (!ctx->layer[i].layout)
+			continue;
+		if (!ctx->layer[i].texrender)
+			ctx->layer[i].texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 
-	gs_texrender_reset(ctx->texrender);
-
-	if (gs_texrender_begin(ctx->texrender, ctx->width, ctx->height)) {
-		struct vec4 clear_color;
-		vec4_zero(&clear_color);
-		gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
-
-		gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
-			 ctx->scroll_offset + (float)ctx->height, -1.0f,
-			 1.0f);
-
-		credits_renderer_draw(ctx->layout, ctx->width,
-				      ctx->scroll_offset,
-				      (float)ctx->height);
-
-		gs_texrender_end(ctx->texrender);
+		gs_texrender_reset(ctx->layer[i].texrender);
+		if (gs_texrender_begin(ctx->layer[i].texrender, ctx->width, ctx->height)) {
+			struct vec4 clear_color;
+			vec4_zero(&clear_color);
+			gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
+			gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
+				 ctx->scroll_offset + (float)ctx->height, -1.0f, 1.0f);
+			credits_renderer_draw(ctx->layer[i].layout, ctx->width,
+					      ctx->scroll_offset, (float)ctx->height);
+			gs_texrender_end(ctx->layer[i].texrender);
+		}
 	}
 
-	gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
+	/* Display ONLY the active layer */
+	gs_texture_t *tex = gs_texrender_get_texture(ctx->layer[ctx->display_layer].texrender);
 	if (tex) {
 		gs_effect_t *def = obs_get_base_effect(OBS_EFFECT_DEFAULT);
-		gs_eparam_t *param =
-			gs_effect_get_param_by_name(def, "image");
+		gs_eparam_t *param = gs_effect_get_param_by_name(def, "image");
 		gs_effect_set_texture(param, tex);
-
 		while (gs_effect_loop(def, "Draw"))
 			gs_draw_sprite(tex, 0, ctx->width, ctx->height);
 	}
