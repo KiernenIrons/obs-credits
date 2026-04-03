@@ -41,6 +41,7 @@ struct credits_source {
 	bool started;
 	bool waiting_loop;
 	bool needs_rebuild;
+	struct credits_layout *pending_free; /* deferred layout cleanup */
 	bool paused;
 
 	/* Hotkeys */
@@ -1205,9 +1206,34 @@ static bool on_yt_toggled(void *data, obs_properties_t *props,
 
 	bool enabled = obs_data_get_bool(settings, "yt_enabled");
 
-	const char *sub_props[] = {
+	/* Show/hide root-level YouTube properties */
+	const char *root_props[] = {
 		"yt_channel_url",
 		"yt_start_collecting",
+	};
+	for (int i = 0; i < 2; i++) {
+		obs_property_t *p = obs_properties_get(props, root_props[i]);
+		if (p)
+			obs_property_set_visible(p, enabled);
+	}
+
+	/* Show/hide the styling group */
+	obs_property_t *grp = obs_properties_get(props, "yt_section_group");
+	if (grp)
+		obs_property_set_visible(grp, enabled);
+
+	return true;
+}
+
+static bool on_yt_expand_toggled(void *data, obs_properties_t *props,
+				 obs_property_t *prop, obs_data_t *settings)
+{
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(prop);
+
+	bool expanded = obs_data_get_bool(settings, "yt_expand");
+
+	const char *top_props[] = {
 		"yt_heading",
 		"yt_heading_font",
 		"yt_entry_font",
@@ -1220,20 +1246,20 @@ static bool on_yt_toggled(void *data, obs_properties_t *props,
 		"yt_entry_spacing",
 		"yt_section_spacing",
 	};
-	for (int i = 0; i < 13; i++) {
-		obs_property_t *p = obs_properties_get(props, sub_props[i]);
+	for (int i = 0; i < 11; i++) {
+		obs_property_t *p = obs_properties_get(props, top_props[i]);
 		if (p)
-			obs_property_set_visible(p, enabled);
+			obs_property_set_visible(p, expanded);
 	}
 
-	/* outline sub-properties: only show if also outline enabled */
+	/* outline sub-properties */
 	bool ol_on = obs_data_get_bool(settings, "yt_outline_enabled");
 	const char *ol_sub[] = {"yt_outline_size", "yt_outline_color",
 				"yt_outline_heading", "yt_outline_entries"};
 	for (int i = 0; i < 4; i++) {
 		obs_property_t *p = obs_properties_get(props, ol_sub[i]);
 		if (p)
-			obs_property_set_visible(p, enabled && ol_on);
+			obs_property_set_visible(p, expanded && ol_on);
 	}
 
 	/* shadow sub-properties */
@@ -1244,7 +1270,7 @@ static bool on_yt_toggled(void *data, obs_properties_t *props,
 	for (int i = 0; i < 5; i++) {
 		obs_property_t *p = obs_properties_get(props, sh_sub[i]);
 		if (p)
-			obs_property_set_visible(p, enabled && sh_on);
+			obs_property_set_visible(p, expanded && sh_on);
 	}
 
 	return true;
@@ -1421,6 +1447,8 @@ static void credits_destroy(void *data)
 	pthread_mutex_unlock(&ctx->mutex);
 
 	credits_renderer_free(layout);
+	credits_renderer_free(ctx->pending_free);
+	ctx->pending_free = NULL;
 	credits_data_free(cdata);
 
 	obs_enter_graphics();
@@ -1858,6 +1886,7 @@ static void credits_get_defaults(obs_data_t *settings)
 
 	/* YouTube chat defaults */
 	obs_data_set_default_bool(settings, "yt_enabled", false);
+	obs_data_set_default_bool(settings, "yt_expand", true);
 	obs_data_set_default_string(settings, "yt_channel_url", "");
 	obs_data_set_default_string(settings, "yt_heading", "YouTube Chat");
 	obs_data_set_default_string(settings, "yt_alignment", "center");
@@ -1922,27 +1951,28 @@ static void credits_video_tick(void *data, float seconds)
 
 	pthread_mutex_lock(&ctx->mutex);
 
+	/* Free any layout deferred from previous tick */
+	if (ctx->pending_free) {
+		credits_renderer_free(ctx->pending_free);
+		ctx->pending_free = NULL;
+	}
+
 	if (ctx->data && (ctx->needs_rebuild || !ctx->layout)) {
-		/* Build new layout, then swap - keeps old layout visible
-		 * during build so there's no 1-frame flicker gap. */
+		/* Build new layout, swap in, defer old layout free to next
+		 * tick. This ensures the old layout's sources stay alive
+		 * through the current render pass (no flicker). */
 		struct credits_layout *new_layout =
 			credits_renderer_build(
 				ctx->data, ctx->width,
 				ctx->default_font_face,
 				ctx->default_font_size);
 		if (new_layout) {
-			struct credits_layout *old = ctx->layout;
+			ctx->pending_free = ctx->layout;
 			ctx->layout = new_layout;
 			ctx->total_height =
 				credits_renderer_total_height(new_layout);
-			ctx->needs_rebuild = false;
-			/* Free old layout outside mutex */
-			pthread_mutex_unlock(&ctx->mutex);
-			credits_renderer_free(old);
-			pthread_mutex_lock(&ctx->mutex);
-		} else {
-			ctx->needs_rebuild = false;
 		}
+		ctx->needs_rebuild = false;
 	}
 
 	if (ctx->scrolling && ctx->layout) {
@@ -2690,21 +2720,39 @@ static obs_properties_t *credits_get_properties(void *data)
 		on_yt_start_collecting, ctx);
 	obs_property_set_visible(yt_start, yt_on);
 
-	obs_property_t *yt_heading_p = obs_properties_add_text(
-		props, "yt_heading", obs_module_text("YouTubeHeading"),
-		OBS_TEXT_DEFAULT);
-	obs_property_set_visible(yt_heading_p, yt_on);
+	/* YouTube styling group */
+	bool yt_expand = obs_data_get_bool(settings, "yt_expand");
+	const char *yt_heading_val =
+		obs_data_get_string(settings, "yt_heading");
+	char yt_group_label[128];
+	if (yt_heading_val && yt_heading_val[0] != '\0')
+		snprintf(yt_group_label, sizeof(yt_group_label), "%s",
+			 yt_heading_val);
+	else
+		snprintf(yt_group_label, sizeof(yt_group_label), "%s",
+			 obs_module_text("YouTubeChatSection"));
 
-	obs_property_t *yt_hfont = obs_properties_add_font(
-		props, "yt_heading_font", obs_module_text("HeadingFont"));
-	obs_property_set_visible(yt_hfont, yt_on);
+	obs_properties_t *yt_group = obs_properties_create();
 
-	obs_property_t *yt_efont = obs_properties_add_font(
-		props, "yt_entry_font", obs_module_text("EntryFont"));
-	obs_property_set_visible(yt_efont, yt_on);
+	/* Expand toggle */
+	obs_property_t *yt_exp = obs_properties_add_bool(
+		yt_group, "yt_expand", obs_module_text("ExpandSection"));
+	obs_property_set_modified_callback2(yt_exp, on_yt_expand_toggled, ctx);
 
+	/* Heading */
+	obs_properties_add_text(yt_group, "yt_heading",
+				obs_module_text("YouTubeHeading"),
+				OBS_TEXT_DEFAULT);
+
+	/* Fonts */
+	obs_properties_add_font(yt_group, "yt_heading_font",
+				obs_module_text("HeadingFont"));
+	obs_properties_add_font(yt_group, "yt_entry_font",
+				obs_module_text("EntryFont"));
+
+	/* Alignment */
 	obs_property_t *yt_align = obs_properties_add_list(
-		props, "yt_alignment", obs_module_text("Alignment"),
+		yt_group, "yt_alignment", obs_module_text("Alignment"),
 		OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_STRING);
 	obs_property_list_add_string(yt_align, obs_module_text("AlignLeft"),
 				     "left");
@@ -2712,96 +2760,107 @@ static obs_properties_t *credits_get_properties(void *data)
 				     "center");
 	obs_property_list_add_string(yt_align, obs_module_text("AlignRight"),
 				     "right");
-	obs_property_set_visible(yt_align, yt_on);
 
-	obs_property_t *yt_hcol = obs_properties_add_color(
-		props, "yt_heading_color",
-		obs_module_text("SectionHeadingColor"));
-	obs_property_set_visible(yt_hcol, yt_on);
-
-	obs_property_t *yt_tcol = obs_properties_add_color(
-		props, "yt_text_color", obs_module_text("SectionTextColor"));
-	obs_property_set_visible(yt_tcol, yt_on);
+	/* Colors */
+	obs_properties_add_color(yt_group, "yt_heading_color",
+				 obs_module_text("SectionHeadingColor"));
+	obs_properties_add_color(yt_group, "yt_text_color",
+				 obs_module_text("SectionTextColor"));
 
 	/* Outline */
 	bool yt_ol_on = obs_data_get_bool(settings, "yt_outline_enabled");
 	obs_property_t *yt_ol_cb = obs_properties_add_bool(
-		props, "yt_outline_enabled",
+		yt_group, "yt_outline_enabled",
 		obs_module_text("SectionOutlineEnabled"));
 	obs_property_set_modified_callback2(yt_ol_cb, on_yt_outline_toggled,
 					    ctx);
-	obs_property_set_visible(yt_ol_cb, yt_on);
-
-	obs_property_t *yt_ol_sz = obs_properties_add_int(
-		props, "yt_outline_size",
-		obs_module_text("SectionOutlineSize"), 1, 20, 1);
-	obs_property_set_visible(yt_ol_sz, yt_on && yt_ol_on);
-
-	obs_property_t *yt_ol_col = obs_properties_add_color(
-		props, "yt_outline_color",
-		obs_module_text("SectionOutlineColor"));
-	obs_property_set_visible(yt_ol_col, yt_on && yt_ol_on);
-
-	obs_property_t *yt_ol_h = obs_properties_add_bool(
-		props, "yt_outline_heading",
-		obs_module_text("OutlineApplyHeading"));
-	obs_property_set_visible(yt_ol_h, yt_on && yt_ol_on);
-
-	obs_property_t *yt_ol_e = obs_properties_add_bool(
-		props, "yt_outline_entries",
-		obs_module_text("OutlineApplyEntries"));
-	obs_property_set_visible(yt_ol_e, yt_on && yt_ol_on);
+	obs_properties_add_int(yt_group, "yt_outline_size",
+			       obs_module_text("SectionOutlineSize"), 1, 20, 1);
+	obs_properties_add_color(yt_group, "yt_outline_color",
+				 obs_module_text("SectionOutlineColor"));
+	obs_properties_add_bool(yt_group, "yt_outline_heading",
+				obs_module_text("OutlineApplyHeading"));
+	obs_properties_add_bool(yt_group, "yt_outline_entries",
+				obs_module_text("OutlineApplyEntries"));
 
 	/* Shadow */
 	bool yt_sh_on = obs_data_get_bool(settings, "yt_shadow_enabled");
 	obs_property_t *yt_sh_cb = obs_properties_add_bool(
-		props, "yt_shadow_enabled",
+		yt_group, "yt_shadow_enabled",
 		obs_module_text("SectionShadowEnabled"));
 	obs_property_set_modified_callback2(yt_sh_cb, on_yt_shadow_toggled,
 					    ctx);
-	obs_property_set_visible(yt_sh_cb, yt_on);
-
-	obs_property_t *yt_sh_col = obs_properties_add_color(
-		props, "yt_shadow_color",
-		obs_module_text("SectionShadowColor"));
-	obs_property_set_visible(yt_sh_col, yt_on && yt_sh_on);
-
-	obs_property_t *yt_sh_ox = obs_properties_add_float(
-		props, "yt_shadow_offset_x",
-		obs_module_text("SectionShadowOffsetX"), -20.0, 20.0, 0.5);
-	obs_property_set_visible(yt_sh_ox, yt_on && yt_sh_on);
-
-	obs_property_t *yt_sh_oy = obs_properties_add_float(
-		props, "yt_shadow_offset_y",
-		obs_module_text("SectionShadowOffsetY"), -20.0, 20.0, 0.5);
-	obs_property_set_visible(yt_sh_oy, yt_on && yt_sh_on);
-
-	obs_property_t *yt_sh_h = obs_properties_add_bool(
-		props, "yt_shadow_heading",
-		obs_module_text("ShadowApplyHeading"));
-	obs_property_set_visible(yt_sh_h, yt_on && yt_sh_on);
-
-	obs_property_t *yt_sh_e = obs_properties_add_bool(
-		props, "yt_shadow_entries",
-		obs_module_text("ShadowApplyEntries"));
-	obs_property_set_visible(yt_sh_e, yt_on && yt_sh_on);
+	obs_properties_add_color(yt_group, "yt_shadow_color",
+				 obs_module_text("SectionShadowColor"));
+	obs_properties_add_float(yt_group, "yt_shadow_offset_x",
+				 obs_module_text("SectionShadowOffsetX"),
+				 -20.0, 20.0, 0.5);
+	obs_properties_add_float(yt_group, "yt_shadow_offset_y",
+				 obs_module_text("SectionShadowOffsetY"),
+				 -20.0, 20.0, 0.5);
+	obs_properties_add_bool(yt_group, "yt_shadow_heading",
+				obs_module_text("ShadowApplyHeading"));
+	obs_properties_add_bool(yt_group, "yt_shadow_entries",
+				obs_module_text("ShadowApplyEntries"));
 
 	/* Spacing */
-	obs_property_t *yt_hsp = obs_properties_add_float(
-		props, "yt_heading_spacing",
-		obs_module_text("SectionHeadingSpacing"), -9999.0, 9999.0, 1.0);
-	obs_property_set_visible(yt_hsp, yt_on);
+	obs_properties_add_float(yt_group, "yt_heading_spacing",
+				 obs_module_text("SectionHeadingSpacing"),
+				 -9999.0, 9999.0, 1.0);
+	obs_properties_add_float(yt_group, "yt_entry_spacing",
+				 obs_module_text("SectionEntrySpacing"),
+				 -9999.0, 9999.0, 1.0);
+	obs_properties_add_float(yt_group, "yt_section_spacing",
+				 obs_module_text("SectionSectionSpacing"),
+				 -9999.0, 9999.0, 1.0);
 
-	obs_property_t *yt_esp = obs_properties_add_float(
-		props, "yt_entry_spacing",
-		obs_module_text("SectionEntrySpacing"), -9999.0, 9999.0, 1.0);
-	obs_property_set_visible(yt_esp, yt_on);
+	/* Set initial visibility of group contents based on expand state */
+	const char *yt_expand_props[] = {
+		"yt_heading",      "yt_heading_font",  "yt_entry_font",
+		"yt_alignment",    "yt_heading_color", "yt_text_color",
+		"yt_outline_enabled", "yt_shadow_enabled",
+		"yt_heading_spacing", "yt_entry_spacing", "yt_section_spacing",
+	};
+	for (int i = 0; i < 11; i++) {
+		obs_property_t *p =
+			obs_properties_get(yt_group, yt_expand_props[i]);
+		if (p)
+			obs_property_set_visible(p, yt_expand);
+	}
+	/* Outline sub-properties */
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_outline_size"),
+		yt_expand && yt_ol_on);
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_outline_color"),
+		yt_expand && yt_ol_on);
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_outline_heading"),
+		yt_expand && yt_ol_on);
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_outline_entries"),
+		yt_expand && yt_ol_on);
+	/* Shadow sub-properties */
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_shadow_color"),
+		yt_expand && yt_sh_on);
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_shadow_offset_x"),
+		yt_expand && yt_sh_on);
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_shadow_offset_y"),
+		yt_expand && yt_sh_on);
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_shadow_heading"),
+		yt_expand && yt_sh_on);
+	obs_property_set_visible(
+		obs_properties_get(yt_group, "yt_shadow_entries"),
+		yt_expand && yt_sh_on);
 
-	obs_property_t *yt_secsp = obs_properties_add_float(
-		props, "yt_section_spacing",
-		obs_module_text("SectionSectionSpacing"), -9999.0, 9999.0,
-		1.0);
-	obs_property_set_visible(yt_secsp, yt_on);
+	obs_property_t *yt_grp = obs_properties_add_group(
+		props, "yt_section_group", yt_group_label, OBS_GROUP_NORMAL,
+		yt_group);
+	obs_property_set_visible(yt_grp, yt_on);
 
 	/* General settings */
 	obs_properties_add_float(props, "scroll_speed",
