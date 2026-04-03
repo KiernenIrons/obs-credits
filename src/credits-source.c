@@ -690,6 +690,11 @@ static void *discord_fetch_thread(void *arg)
 	ctx->discord_fetching = false;
 	pthread_mutex_unlock(&ctx->mutex);
 
+	/* Trigger update to rebuild layout with fetched data */
+	obs_data_t *settings = obs_source_get_settings(ctx->self);
+	obs_source_update(ctx->self, settings);
+	obs_data_release(settings);
+
 	return NULL;
 }
 
@@ -1115,6 +1120,11 @@ static void *credits_create(obs_data_t *settings, obs_source_t *source)
 		obs_module_text("StopCredits"),
 		credits_hotkey_stop, ctx);
 
+	/* Set initial scroll state before first update */
+	ctx->scrolling = true;
+	ctx->started = false;
+	ctx->paused = false;
+
 	credits_update(ctx, settings);
 	return ctx;
 }
@@ -1353,11 +1363,9 @@ static void credits_update(void *data, obs_data_t *settings)
 
 	ctx->data = credits_build_from_settings(tmp);
 
-	ctx->scroll_offset = 0.0f;
-	ctx->current_speed = 0.0f;
-	ctx->scrolling = true;
-	ctx->started = false;
-	ctx->waiting_loop = false;
+	/* Preserve scroll position on settings changes so edits
+	 * are visible live. Layout rebuilds on next video_tick.
+	 * Scroll only resets via hotkey or first creation. */
 
 	pthread_mutex_unlock(&ctx->mutex);
 
