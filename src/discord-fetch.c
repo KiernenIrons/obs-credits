@@ -277,7 +277,8 @@ struct discord_result *discord_fetch(const char *bot_token,
 						section_buf_push(&bufs[i],
 								 member, true);
 				} else {
-					if (member_has_role(member,
+					if (configs[i].role_id &&
+					    member_has_role(member,
 							    configs[i].role_id))
 						section_buf_push(&bufs[i],
 								 member,

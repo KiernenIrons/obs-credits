@@ -813,6 +813,9 @@ static void start_discord_fetch(struct credits_source *ctx)
 			snprintf(key, sizeof(key), "dsection_%d_role_id", i);
 			const char *rid =
 				obs_data_get_string(settings, key);
+			blog(LOG_INFO,
+			     "[obs-credits] Discord section %d: role_id=%s",
+			     i, rid ? rid : "(null)");
 			args->configs[i].role_id =
 				(rid && rid[0] != '\0') ? bstrdup(rid) : NULL;
 		} else {
