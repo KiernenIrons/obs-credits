@@ -30,18 +30,24 @@ struct credits_source {
 	float loop_delay;
 	float delay_timer;
 
-	/* State */
+	/* State - double-buffered layouts to prevent flicker.
+	 * Layer A and B alternate rebuilds. One is always stable
+	 * while the other is being rebuilt with new data. */
 	struct credits_data *data;
-	struct credits_layout *layout;
-	gs_texrender_t *texrender;
+	struct credits_layout *layout_a;
+	struct credits_layout *layout_b;
+	gs_texrender_t *texrender_a;
+	gs_texrender_t *texrender_b;
+	int active_layer;    /* 0=A is displayed, 1=B is displayed */
+	int warmup_counter;  /* frames rendered since last inactive-layer rebuild */
+	bool needs_rebuild;
+	struct credits_layout *pending_free;
 	float scroll_offset;
 	float current_speed;
 	float total_height;
 	bool scrolling;
 	bool started;
 	bool waiting_loop;
-	bool needs_rebuild;
-	struct credits_layout *pending_free; /* deferred layout cleanup */
 	bool paused;
 
 	/* Hotkeys */
@@ -1359,7 +1365,7 @@ static void credits_hotkey_start(void *data, obs_hotkey_id id,
 	ctx->started = false;
 	ctx->paused = false;
 	ctx->waiting_loop = false;
-	ctx->layout = NULL;
+	ctx->needs_rebuild = true;
 	pthread_mutex_unlock(&ctx->mutex);
 }
 
@@ -1396,6 +1402,17 @@ static void credits_hotkey_stop(void *data, obs_hotkey_id id,
 	ctx->current_speed = 0.0f;
 	pthread_mutex_unlock(&ctx->mutex);
 }
+
+/* ---- Double-buffer helpers ---- */
+
+#define ACTIVE_LAYOUT(ctx) \
+	((ctx)->active_layer == 0 ? (ctx)->layout_a : (ctx)->layout_b)
+#define INACTIVE_LAYOUT(ctx) \
+	((ctx)->active_layer == 0 ? (ctx)->layout_b : (ctx)->layout_a)
+#define ACTIVE_TEXRENDER(ctx) \
+	((ctx)->active_layer == 0 ? (ctx)->texrender_a : (ctx)->texrender_b)
+#define INACTIVE_TEXRENDER(ctx) \
+	((ctx)->active_layer == 0 ? (ctx)->texrender_b : (ctx)->texrender_a)
 
 /* ---- Standard OBS source callbacks ---- */
 
@@ -1441,19 +1458,23 @@ static void credits_destroy(void *data)
 	struct credits_source *ctx = data;
 
 	pthread_mutex_lock(&ctx->mutex);
-	struct credits_layout *layout = ctx->layout;
+	struct credits_layout *la = ctx->layout_a;
+	struct credits_layout *lb = ctx->layout_b;
 	struct credits_data *cdata = ctx->data;
-	ctx->layout = NULL;
+	ctx->layout_a = NULL;
+	ctx->layout_b = NULL;
 	ctx->data = NULL;
 	pthread_mutex_unlock(&ctx->mutex);
 
-	credits_renderer_free(layout);
+	credits_renderer_free(la);
+	credits_renderer_free(lb);
 	credits_renderer_free(ctx->pending_free);
 	ctx->pending_free = NULL;
 	credits_data_free(cdata);
 
 	obs_enter_graphics();
-	gs_texrender_destroy(ctx->texrender);
+	gs_texrender_destroy(ctx->texrender_a);
+	gs_texrender_destroy(ctx->texrender_b);
 	obs_leave_graphics();
 
 	obs_hotkey_unregister(ctx->hotkey_start);
@@ -1958,22 +1979,52 @@ static void credits_video_tick(void *data, float seconds)
 		ctx->pending_free = NULL;
 	}
 
-	if (ctx->data && (ctx->needs_rebuild || !ctx->layout)) {
+	/* Double-buffer rebuild: build into the inactive layer so the active
+	 * layer keeps displaying without a 1-frame black gap. After 3 warmup
+	 * frames (so the inactive layer's text sources have rendered at least
+	 * once), swap active_layer to the newly built layout. */
+	if (ctx->data && (ctx->needs_rebuild || (!ctx->layout_a && !ctx->layout_b))) {
+		int inactive = 1 - ctx->active_layer;
 		struct credits_layout *new_layout =
 			credits_renderer_build(
 				ctx->data, ctx->width,
 				ctx->default_font_face,
 				ctx->default_font_size);
 		if (new_layout) {
-			ctx->pending_free = ctx->layout;
-			ctx->layout = new_layout;
-			ctx->total_height =
-				credits_renderer_total_height(new_layout);
+			/* Defer-free the old inactive slot */
+			if (ctx->pending_free)
+				credits_renderer_free(ctx->pending_free);
+			ctx->pending_free =
+				(inactive == 0) ? ctx->layout_a : ctx->layout_b;
+			if (inactive == 0)
+				ctx->layout_a = new_layout;
+			else
+				ctx->layout_b = new_layout;
+			ctx->warmup_counter = 0;
 		}
 		ctx->needs_rebuild = false;
 	}
 
-	if (ctx->scrolling && ctx->layout) {
+	/* Increment warmup and swap once the inactive layer is ready */
+	ctx->warmup_counter++;
+	{
+		int inactive = 1 - ctx->active_layer;
+		struct credits_layout *inactive_layout =
+			(inactive == 0) ? ctx->layout_a : ctx->layout_b;
+		if (inactive_layout && ctx->warmup_counter >= 3) {
+			ctx->active_layer = inactive;
+			ctx->warmup_counter = 0;
+		}
+	}
+
+	/* Update total_height from the active layout */
+	{
+		struct credits_layout *al = ACTIVE_LAYOUT(ctx);
+		if (al)
+			ctx->total_height = credits_renderer_total_height(al);
+	}
+
+	if (ctx->scrolling && ACTIVE_LAYOUT(ctx)) {
 		if (!ctx->started) {
 			ctx->scroll_offset = -(float)ctx->height;
 			ctx->delay_timer = 0.0f;
@@ -2032,7 +2083,7 @@ static void credits_video_tick(void *data, float seconds)
 	/* Poll YouTube chat count every ~2 seconds.
 	 * Must NOT hold the mutex when calling obs_source_update. */
 	ctx->yt_poll_timer += seconds;
-	if (ctx->yt_poll_timer >= 30.0f) {
+	if (ctx->yt_poll_timer >= 6.0f) {
 		ctx->yt_poll_timer = 0.0f;
 
 		pthread_mutex_lock(&ctx->mutex);
@@ -2070,34 +2121,52 @@ static void credits_video_render(void *data, gs_effect_t *effect)
 
 	pthread_mutex_lock(&ctx->mutex);
 
-	if (!ctx->layout || ctx->width == 0 || ctx->height == 0) {
+	if ((!ctx->layout_a && !ctx->layout_b) ||
+	    ctx->width == 0 || ctx->height == 0) {
 		pthread_mutex_unlock(&ctx->mutex);
 		UNUSED_PARAMETER(effect);
 		return;
 	}
 
-	if (!ctx->texrender)
-		ctx->texrender = gs_texrender_create(GS_RGBA, GS_ZS_NONE);
+	/* Render BOTH layers every frame so inactive-layer text sources get
+	 * frames to warm up before they are swapped into display. */
+	struct credits_layout *layers[2] = {ctx->layout_a, ctx->layout_b};
+	gs_texrender_t **texrenders[2] = {&ctx->texrender_a, &ctx->texrender_b};
 
-	gs_texrender_reset(ctx->texrender);
+	for (int li = 0; li < 2; li++) {
+		if (!layers[li])
+			continue;
 
-	if (gs_texrender_begin(ctx->texrender, ctx->width, ctx->height)) {
-		struct vec4 clear_color;
-		vec4_zero(&clear_color);
-		gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
+		if (!(*texrenders[li]))
+			*texrenders[li] =
+				gs_texrender_create(GS_RGBA, GS_ZS_NONE);
 
-		gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
-			 ctx->scroll_offset + (float)ctx->height, -1.0f,
-			 1.0f);
+		gs_texrender_reset(*texrenders[li]);
 
-		credits_renderer_draw(ctx->layout, ctx->width,
-				      ctx->scroll_offset,
-				      (float)ctx->height);
+		if (gs_texrender_begin(*texrenders[li], ctx->width,
+				       ctx->height)) {
+			struct vec4 clear_color;
+			vec4_zero(&clear_color);
+			gs_clear(GS_CLEAR_COLOR, &clear_color, 0.0f, 0);
 
-		gs_texrender_end(ctx->texrender);
+			gs_ortho(0.0f, (float)ctx->width, ctx->scroll_offset,
+				 ctx->scroll_offset + (float)ctx->height,
+				 -1.0f, 1.0f);
+
+			credits_renderer_draw(layers[li], ctx->width,
+					      ctx->scroll_offset,
+					      (float)ctx->height);
+
+			gs_texrender_end(*texrenders[li]);
+		}
 	}
 
-	gs_texture_t *tex = gs_texrender_get_texture(ctx->texrender);
+	/* Display ONLY the active layer to the output */
+	gs_texrender_t *active_tr = (ctx->active_layer == 0)
+					    ? ctx->texrender_a
+					    : ctx->texrender_b;
+	gs_texture_t *tex = active_tr ? gs_texrender_get_texture(active_tr)
+				      : NULL;
 	if (tex) {
 		gs_effect_t *def = obs_get_base_effect(OBS_EFFECT_DEFAULT);
 		gs_eparam_t *param =
