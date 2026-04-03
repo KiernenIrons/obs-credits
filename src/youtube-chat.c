@@ -232,18 +232,35 @@ static void poll_chat(struct yt_chat_ctx *ctx)
 		body);
 	bfree(body);
 
-	if (!response)
+	if (!response) {
+		blog(LOG_WARNING, "[obs-credits] YouTube chat: no response from poll");
 		return;
+	}
 
 	cJSON *root = cJSON_Parse(response);
-	bfree(response);
-
-	if (!root)
+	if (!root) {
+		blog(LOG_WARNING, "[obs-credits] YouTube chat: failed to parse poll response (len=%zu)",
+		     strlen(response));
+		bfree(response);
 		return;
+	}
+	bfree(response);
 
 	/* Extract continuation token for next poll */
 	const cJSON *cont_actions =
 		cJSON_GetObjectItem(root, "continuationContents");
+	if (!cJSON_IsObject(cont_actions)) {
+		blog(LOG_WARNING, "[obs-credits] YouTube chat: no continuationContents in response");
+		/* Try to log top-level keys for debugging */
+		cJSON *child = root->child;
+		while (child) {
+			blog(LOG_INFO, "[obs-credits] YouTube chat: response key: %s",
+			     child->string ? child->string : "(null)");
+			child = child->next;
+		}
+		cJSON_Delete(root);
+		return;
+	}
 	if (cJSON_IsObject(cont_actions)) {
 		const cJSON *live_chat = cJSON_GetObjectItem(
 			cont_actions, "liveChatContinuation");
@@ -280,6 +297,9 @@ static void poll_chat(struct yt_chat_ctx *ctx)
 			/* Extract chat messages */
 			const cJSON *actions = cJSON_GetObjectItem(
 				live_chat, "actions");
+			blog(LOG_INFO, "[obs-credits] YouTube chat: actions array %s, size=%d",
+			     cJSON_IsArray(actions) ? "found" : "NOT FOUND",
+			     cJSON_IsArray(actions) ? cJSON_GetArraySize(actions) : 0);
 			if (cJSON_IsArray(actions)) {
 				const cJSON *action = NULL;
 				cJSON_ArrayForEach(action, actions)
