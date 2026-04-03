@@ -863,6 +863,7 @@ static void credits_activate(void *data)
 	pthread_mutex_unlock(&ctx->mutex);
 
 	/* Always fetch Discord data on scene activation */
+	blog(LOG_INFO, "[obs-credits] Scene activated, starting Discord fetch");
 	start_discord_fetch(ctx);
 }
 
