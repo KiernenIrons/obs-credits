@@ -2052,6 +2052,9 @@ static void credits_video_tick(void *data, float seconds)
 
 			pthread_mutex_lock(&ctx->mutex);
 			if (cur_count != ctx->yt_last_count) {
+				blog(LOG_INFO,
+				     "[obs-credits] YouTube chatters: %zu -> %zu",
+				     ctx->yt_last_count, cur_count);
 				ctx->yt_last_count = cur_count;
 				changed = true;
 			}
