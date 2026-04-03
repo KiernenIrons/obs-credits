@@ -862,7 +862,6 @@ static void credits_activate(void *data)
 	pthread_mutex_unlock(&ctx->mutex);
 
 	/* Always fetch Discord data on scene activation */
-	blog(LOG_INFO, "[obs-credits] Scene activated, starting Discord fetch");
 	start_discord_fetch(ctx);
 }
 
@@ -2052,9 +2051,6 @@ static void credits_video_tick(void *data, float seconds)
 
 			pthread_mutex_lock(&ctx->mutex);
 			if (cur_count != ctx->yt_last_count) {
-				blog(LOG_INFO,
-				     "[obs-credits] YouTube chatters: %zu -> %zu",
-				     ctx->yt_last_count, cur_count);
 				ctx->yt_last_count = cur_count;
 				changed = true;
 			}
