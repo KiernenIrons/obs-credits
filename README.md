@@ -38,7 +38,7 @@ Paste your channel URL and chatters are collected automatically during your stre
 
 ### Windows
 
-1. Download the latest installer from [Releases](https://github.com/KiernenIrons/obs-credits/releases)
+1. Download the latest installer from [Releases](https://github.com/KiernenIrons/credits-plugin/releases)
 2. Close OBS Studio
 3. Run the installer (requires admin)
 4. Open OBS Studio and add a **"Credits"** source
