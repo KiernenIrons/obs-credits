@@ -1,4 +1,4 @@
-# OBS Credits Plugin - Development Guide
+# Credits Plugin - Development Guide
 
 ## Author
 
